@@ -26,7 +26,7 @@ lld-link \
   /subsystem:efi_application /entry:efi_main /machine:arm64 /nodefaultlib \
   /out:"$EFI_APP" "$BUILD/main.obj"
 
-file "$EFI_APP" | grep -q 'PE32+ executable for EFI (application)' || {
+file "$EFI_APP" | grep -Eiq 'PE32\+ executable.*EFI.*application|PE32\+ executable.*application.*EFI' || {
   echo "The compiler output is not an AArch64 EFI application." >&2
   file "$EFI_APP" >&2
   exit 1
