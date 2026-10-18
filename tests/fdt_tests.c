@@ -146,6 +146,18 @@ static void test_invalid_structure_and_arguments(void) {
     CHECK(astra_fdt_root_property(&view, "model", 5u, &value, &value_length) ==
         ASTRA_FDT_INVALID_STRUCTURE);
 
+    blob_size = make_valid_blob(blob, sizeof blob);
+    write_be32(&blob[92], 4u);
+    CHECK(astra_fdt_open(blob, blob_size, &view) == ASTRA_FDT_INVALID_STRUCTURE);
+
+    blob_size = make_valid_blob(blob, sizeof blob);
+    write_be32(&blob[88], 4u);
+    CHECK(astra_fdt_open(blob, blob_size, &view) == ASTRA_FDT_INVALID_STRUCTURE);
+
+    blob_size = make_valid_blob(blob, sizeof blob);
+    write_be32(&blob[56], UINT32_C(0x00000007));
+    CHECK(astra_fdt_open(blob, blob_size, &view) == ASTRA_FDT_INVALID_STRUCTURE);
+
     CHECK(astra_fdt_root_property(&view, NULL, 5u, &value, &value_length) ==
         ASTRA_FDT_INVALID_ARGUMENT);
     CHECK(astra_fdt_root_property(&view, "model", 5u, NULL, &value_length) ==
