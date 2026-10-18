@@ -31,7 +31,7 @@ done
 rm -rf "$BUILD"
 mkdir -p "$BUILD/EFI/BOOT" "$STAGING/EFI/BOOT" "$BUILD/objects"
 
-echo "[1/5] Compile the UEFI kernel loader"
+echo "[1/6] Compile the UEFI kernel loader"
 clang \
   --target=aarch64-pc-windows-msvc \
   -std=c17 -fshort-wchar -ffreestanding -fno-builtin \
@@ -63,7 +63,7 @@ if ! grep -Eiq 'ARM64|AArch64' <<< "$EFI_DESCRIPTION"; then
   exit 1
 fi
 
-echo "[2/5] Compile the freestanding AArch64 kernel"
+echo "[2/6] Compile the freestanding AArch64 kernel"
 KERNEL_FLAGS=(
   --target=aarch64-none-elf
   -std=c17
@@ -125,7 +125,7 @@ fi
 echo "Kernel ELF: $BUILD/kernel.elf"
 echo "Kernel flat image: $KERNEL_BYTES bytes"
 
-echo "[3/5] Build the FAT EFI System Partition"
+echo "[3/6] Build the FAT EFI System Partition"
 dd if=/dev/zero of="$BUILD/efiboot.img" bs=1M count=64 status=none
 mkfs.vfat -F 32 -n ASTRAOS "$BUILD/efiboot.img" >/dev/null
 mmd -i "$BUILD/efiboot.img" ::/EFI
