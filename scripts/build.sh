@@ -21,7 +21,7 @@ WARN_FLAGS=(
   -Werror
 )
 
-for tool in clang lld-link ld.lld nm xorriso mkfs.vfat mmd mcopy dd file sha256sum stat; do
+for tool in clang lld-link ld.lld nm xorriso mkfs.vfat mmd mcopy dd file sha256sum stat python3; do
   if ! command -v "$tool" >/dev/null 2>&1; then
     echo "Missing required build tool: $tool" >&2
     exit 1
@@ -148,14 +148,35 @@ echo "[4/5] Create a UEFI-bootable ARM64 ISO"
 )
 
 cp "$BUILD/efiboot.img" "$BUILD/astraos-aarch64-esp.img"
-echo "[5/5] Generate checksums"
-sha256sum \
-  "$BUILD/astraos-aarch64.iso" \
-  "$BUILD/astraos-aarch64-esp.img" \
-  "$BUILD/kernel.elf" \
-  "$BUILD/kernel.bin" > "$BUILD/SHA256SUMS"
+
+echo "[5/6] Build an interactive QEMU virt image with a test-only board DTB"
+python3 "$ROOT/tests/make_fdt_fixture.py" "$BUILD/platform-qemu.dtb"
+cp -a "$STAGING" "$BUILD/staging-qemu-virt"
+mcopy -i "$BUILD/staging-qemu-virt/efiboot.img" "$BUILD/platform-qemu.dtb" ::/platform.dtb
+(
+  cd "$BUILD/staging-qemu-virt"
+  xorriso -as mkisofs -r -J -V ASTRAOS-QEMU-VIRT \
+    -o "$BUILD/astraos-qemu-virt.iso" \
+    -e efiboot.img -no-emul-boot \
+    -append_partition 2 0xef efiboot.img .
+)
+cp "$BUILD/staging-qemu-virt/efiboot.img" "$BUILD/astraos-qemu-virt-esp.img"
+
+echo "[6/6] Generate portable checksums"
+(
+  cd "$BUILD"
+  sha256sum \
+    astraos-aarch64.iso \
+    astraos-aarch64-esp.img \
+    astraos-qemu-virt.iso \
+    astraos-qemu-virt-esp.img \
+    kernel.elf \
+    kernel.bin > SHA256SUMS
+)
 
 echo "Built: $BUILD/astraos-aarch64.iso"
 echo "Built: $BUILD/astraos-aarch64-esp.img"
+echo "Built: $BUILD/astraos-qemu-virt.iso (QEMU-only DTB fixture)"
+echo "Built: $BUILD/astraos-qemu-virt-esp.img"
 echo "Built: $BUILD/kernel.elf"
 echo "Built: $BUILD/kernel.bin"
