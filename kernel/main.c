@@ -517,7 +517,7 @@ static void command_dispatch(const char *command, size_t command_len,
 enum { DEVICE_TREE_PROPERTY_DISPLAY_CAP = 128u };
 
 static void print_device_tree_info(const AstraBootInfo *boot_info) {
-    AstraFdtView view = {0};
+    AstraFdtView view;
     AstraFdtResult result = ASTRA_FDT_OK;
     const uint8_t *model = NULL;
     size_t model_length = 0;
@@ -566,6 +566,45 @@ static void print_device_tree_info(const AstraBootInfo *boot_info) {
         astra_uart_puts("Warning: could not read device-tree model: ");
         astra_uart_puts(astra_fdt_result_name(result));
         astra_uart_puts("\n");
+    }
+
+
+    {
+        const uint8_t *stdout_path = NULL;
+        size_t stdout_path_length = 0u;
+
+        result = astra_fdt_node_property(
+            &view,
+            "/chosen",
+            sizeof "/chosen" - 1u,
+            "stdout-path",
+            sizeof "stdout-path" - 1u,
+            &stdout_path,
+            &stdout_path_length
+        );
+        if (result == ASTRA_FDT_OK) {
+            astra_uart_puts("FDT stdout-path: ");
+            for (size_t i = 0u; i < stdout_path_length &&
+                i < (size_t)DEVICE_TREE_PROPERTY_DISPLAY_CAP; i++) {
+                uint8_t byte = stdout_path[i];
+
+                if (byte == 0u) {
+                    break;
+                }
+                if (byte >= (uint8_t)' ' && byte <= (uint8_t)'~') {
+                    astra_uart_put_byte(byte);
+                } else {
+                    astra_uart_put_byte((uint8_t)'?');
+                }
+            }
+            astra_uart_puts("\n");
+        } else if (result == ASTRA_FDT_PROPERTY_NOT_FOUND) {
+            astra_uart_puts("FDT stdout-path: not provided\n");
+        } else {
+            astra_uart_puts("Warning: could not read FDT stdout-path: ");
+            astra_uart_puts(astra_fdt_result_name(result));
+            astra_uart_puts("\n");
+        }
     }
 
     result = astra_fdt_root_property(&view, "compatible", 10u,
