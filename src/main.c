@@ -1,3 +1,5 @@
+#include <stddef.h>
+
 /* AstraOS: an AArch64 UEFI-native OS prototype.
  * Firmware supplies device I/O; the shell, RAM filesystem and permission
  * checks are AstraOS code. This alpha is not yet a protected-mode kernel.
@@ -13,6 +15,7 @@ typedef UINT8 BOOLEAN;
 typedef unsigned long long UINTN;
 #define EFIAPI
 #define EFI_SUCCESS 0
+#define EFI_INVALID_PARAMETER 0x8000000000000002ULL
 #define EFI_NOT_READY 0x8000000000000006ULL
 #define TRUE 1
 #define FALSE 0
@@ -480,21 +483,86 @@ static void dispatch(CHAR16 *line) {
 EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *systemTable);
 
 EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *systemTable) {
-    EFI_INPUT_KEY key;EFI_STATUS status;UINTN len=0; (void)image;
-    gOut=systemTable->ConOut;gIn=systemTable->ConIn;
+    EFI_INPUT_KEY key = {0};
+    EFI_STATUS status = EFI_SUCCESS;
+    UINTN len = 0;
+    (void)image;
+
+    if (systemTable == NULL || systemTable->ConOut == NULL ||
+        systemTable->ConIn == NULL ||
+        systemTable->ConOut->OutputString == NULL ||
+        systemTable->ConIn->ReadKeyStroke == NULL) {
+        return EFI_INVALID_PARAMETER;
+    }
+    gOut = systemTable->ConOut;
+    gIn = systemTable->ConIn;
+    gOutputError = EFI_SUCCESS;
     fs_init();
-    if(gOut->ClearScreen)gOut->ClearScreen(gOut);
+
+    if (gOut->ClearScreen != NULL) {
+        status = gOut->ClearScreen(gOut);
+        if (status != EFI_SUCCESS) {
+            return status;
+        }
+    }
     out(L"\r\n==============================\r\n          ASTRAOS\r\n==============================\r\n\r\n");
     out(L"AstraOS alpha 0.1 | AArch64 UEFI live prototype\r\nType 'help' for commands. Changes are kept in RAM only.\r\n\r\n");
-    for(;;) {
-        out(username(gUid));out(L"@astra:");print_cwd_path();out(L"# ");
-        for(;;) {
-            status=gIn->ReadKeyStroke(gIn,&key);
-            if(status==EFI_NOT_READY)continue;
-            if(status!=EFI_SUCCESS)continue;
-            if(key.UnicodeChar==0x000D){newline();gLine[len]=0;dispatch(gLine);if(s_cmp(gLine,L"__exit__")==0)return EFI_SUCCESS;len=0;gLine[0]=0;break;}
-            if(key.UnicodeChar==0x0008){if(len){len--;gLine[len]=0;out(L"\b \b");}continue;}
-            if(key.UnicodeChar>=32 && key.UnicodeChar<127 && len+1<LINE_CAP){gLine[len++]=key.UnicodeChar;gLine[len]=0;out_ch(key.UnicodeChar);}
+    if (gOutputError != EFI_SUCCESS) {
+        return gOutputError;
+    }
+
+    for (;;) {
+        out(username(gUid));
+        out(L"@astra:");
+        print_cwd_path();
+        out(L"# ");
+        if (gOutputError != EFI_SUCCESS) {
+            return gOutputError;
+        }
+
+        for (;;) {
+            status = gIn->ReadKeyStroke(gIn, &key);
+            if (status == EFI_NOT_READY) {
+                continue;
+            }
+            if (status != EFI_SUCCESS) {
+                return status;
+            }
+            if (key.UnicodeChar == 0x000D) {
+                newline();
+                gLine[len] = 0;
+                dispatch(gLine);
+                if (s_cmp(gLine, L"__exit__") == 0) {
+                    return EFI_SUCCESS;
+                }
+                if (gOutputError != EFI_SUCCESS) {
+                    return gOutputError;
+                }
+                len = 0;
+                gLine[0] = 0;
+                break;
+            }
+            if (key.UnicodeChar == 0x0008) {
+                if (len > 0) {
+                    len--;
+                    gLine[len] = 0;
+                    out(L"\b \b");
+                }
+                if (gOutputError != EFI_SUCCESS) {
+                    return gOutputError;
+                }
+                continue;
+            }
+            if (key.UnicodeChar >= 32 && key.UnicodeChar < 127 &&
+                len + 1u < (UINTN)LINE_CAP) {
+                gLine[len] = key.UnicodeChar;
+                len++;
+                gLine[len] = 0;
+                out_ch(key.UnicodeChar);
+                if (gOutputError != EFI_SUCCESS) {
+                    return gOutputError;
+                }
+            }
         }
     }
 }
