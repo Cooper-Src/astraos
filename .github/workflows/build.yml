@@ -22,6 +22,17 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y clang lld xorriso dosfstools mtools qemu-system-arm qemu-efi-aarch64 file
 
+      - name: Run sanitizer-backed shell regression tests
+        run: |
+          clang -std=c17 -fshort-wchar -g -O0 \
+            -Wall -Wextra -Wpedantic -Wshadow -Wconversion -Wformat=2 \
+            -Wstrict-prototypes -Wmissing-prototypes -Wwrite-strings \
+            -Wcast-qual -Wundef -Wvla -Werror \
+            -fsanitize=address,undefined -fno-sanitize-recover=undefined \
+            -fno-omit-frame-pointer \
+            tests/uefi_shell_tests.c -o /tmp/astraos-shell-tests
+          UBSAN_OPTIONS=print_stacktrace=1 /tmp/astraos-shell-tests
+
       - name: Build ARM64 UEFI application and ISO
         run: bash ./scripts/build.sh
 
