@@ -1,5 +1,6 @@
 #include "boot_info.h"
 #include "framebuffer.h"
+#include "fdt.h"
 #include "memory.h"
 #include "uart.h"
 #include "vfs.h"
@@ -510,6 +511,60 @@ static void command_dispatch(const char *command, size_t command_len,
     }
 }
 
+enum { DEVICE_TREE_MODEL_DISPLAY_CAP = 128u };
+
+static void print_device_tree_info(const AstraBootInfo *boot_info) {
+    AstraFdtView view = {0};
+    AstraFdtResult result = ASTRA_FDT_OK;
+    const uint8_t *model = NULL;
+    size_t model_length = 0;
+
+    if (boot_info == NULL || boot_info->device_tree_base == 0u ||
+        boot_info->device_tree_size == 0u ||
+        boot_info->device_tree_size > (uint64_t)ASTRA_FDT_MAX_SIZE ||
+        boot_info->device_tree_base > (uint64_t)UINTPTR_MAX) {
+        astra_uart_puts("Firmware device tree unavailable; board discovery is limited.\n");
+        return;
+    }
+
+    result = astra_fdt_open(
+        (const void *)(uintptr_t)boot_info->device_tree_base,
+        (size_t)boot_info->device_tree_size,
+        &view
+    );
+    if (result != ASTRA_FDT_OK) {
+        astra_uart_puts("Warning: kernel rejected the firmware device tree: ");
+        astra_uart_puts(astra_fdt_result_name(result));
+        astra_uart_puts("\n");
+        return;
+    }
+
+    astra_uart_puts("Firmware device tree validated.\n");
+    result = astra_fdt_root_property(&view, "model", 5u, &model, &model_length);
+    if (result != ASTRA_FDT_OK) {
+        if (result != ASTRA_FDT_PROPERTY_NOT_FOUND) {
+            astra_uart_puts("Warning: could not read device-tree model: ");
+            astra_uart_puts(astra_fdt_result_name(result));
+            astra_uart_puts("\n");
+        }
+        return;
+    }
+
+    astra_uart_puts("Device model: ");
+    for (size_t i = 0; i < model_length && i < (size_t)DEVICE_TREE_MODEL_DISPLAY_CAP; i++) {
+        uint8_t byte = model[i];
+        if (byte == 0u) {
+            break;
+        }
+        if (byte >= (uint8_t)' ' && byte <= (uint8_t)'~') {
+            astra_uart_put_byte(byte);
+        } else {
+            astra_uart_put_byte((uint8_t)'?');
+        }
+    }
+    astra_uart_puts("\n");
+}
+
 void astra_kernel_main(const AstraBootInfo *boot_info) {
     char line[KERNEL_LINE_CAP];
     AstraVfsResult result = ASTRA_VFS_OK;
@@ -534,6 +589,7 @@ void astra_kernel_main(const AstraBootInfo *boot_info) {
         astra_uart_put_hex(boot_info->kernel_base);
         astra_uart_puts("\n");
 
+        print_device_tree_info(boot_info);
         memory_result = astra_memory_init(&g_memory, boot_info);
         if (memory_result == ASTRA_MEMORY_OK) {
             g_memory_ready = true;
