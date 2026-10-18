@@ -29,7 +29,7 @@ typedef EFI_UINT16 CHAR16;
 #define EFI_ABORTED (EFI_ERROR_BIT | UINT64_C(21))
 
 enum {
-    EFI_ALLOCATE_ADDRESS = 2,
+    EFI_ALLOCATE_ANY_PAGES = 0,
     EFI_LOADER_CODE = 1,
     EFI_FILE_MODE_READ = 1
 };
@@ -40,8 +40,6 @@ enum {
     MEMORY_MAP_WORDS = 16384u,
     PAGE_SIZE = 4096u
 };
-
-#define KERNEL_LOAD_BASE UINT64_C(0x40200000)
 
 typedef struct EFI_GUID {
     EFI_UINT32 Data1;
@@ -85,6 +83,7 @@ typedef EFI_STATUS (EFIAPI *EFI_ALLOCATE_PAGES)(
     EFI_UINTN,
     EFI_UINT64 *
 );
+typedef EFI_STATUS (EFIAPI *EFI_FREE_PAGES)(EFI_UINT64, EFI_UINTN);
 typedef EFI_STATUS (EFIAPI *EFI_GET_MEMORY_MAP)(
     EFI_UINTN *,
     void *,
@@ -100,7 +99,7 @@ struct EFI_BOOT_SERVICES {
     void *RaiseTPL;
     void *RestoreTPL;
     EFI_ALLOCATE_PAGES AllocatePages;
-    void *FreePages;
+    EFI_FREE_PAGES FreePages;
     EFI_GET_MEMORY_MAP GetMemoryMap;
     void *AllocatePool;
     void *FreePool;
@@ -582,7 +581,8 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *system_table);
 EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *system_table) {
     EFI_STATUS status = EFI_SUCCESS;
     size_t kernel_size = 0;
-    EFI_UINT64 kernel_address = KERNEL_LOAD_BASE;
+    EFI_UINT64 kernel_address = 0;
+    EFI_STATUS free_status = EFI_SUCCESS;
     EFI_UINTN page_count = (EFI_UINTN)(KERNEL_ALLOCATION_SIZE / PAGE_SIZE);
     EFI_UINTN map_size = 0;
     EFI_UINTN map_key = 0;
@@ -601,7 +601,8 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *system_table) {
 
     boot_services = system_table->BootServices;
     if (boot_services->HandleProtocol == NULL || boot_services->AllocatePages == NULL ||
-        boot_services->GetMemoryMap == NULL || boot_services->ExitBootServices == NULL) {
+        boot_services->FreePages == NULL || boot_services->GetMemoryMap == NULL ||
+        boot_services->ExitBootServices == NULL) {
         loader_out(L"error: required UEFI services are unavailable\r\n");
         return EFI_UNSUPPORTED;
     }
@@ -618,14 +619,24 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *system_table) {
     }
 
     status = boot_services->AllocatePages(
-        EFI_ALLOCATE_ADDRESS,
+        EFI_ALLOCATE_ANY_PAGES,
         EFI_LOADER_CODE,
         page_count,
         &kernel_address
     );
-    if (status != EFI_SUCCESS || kernel_address != KERNEL_LOAD_BASE) {
-        loader_out(L"error: kernel load address could not be reserved\r\n");
-        return status == EFI_SUCCESS ? EFI_OUT_OF_RESOURCES : status;
+    if (status != EFI_SUCCESS) {
+        loader_out(L"error: could not allocate memory for kernel\r\n");
+        return status;
+    }
+    if (kernel_address == 0 ||
+        (kernel_address % (EFI_UINT64)PAGE_SIZE) != 0 ||
+        kernel_address > UINT64_MAX - (EFI_UINT64)KERNEL_ALLOCATION_SIZE) {
+        free_status = boot_services->FreePages(kernel_address, page_count);
+        if (free_status != EFI_SUCCESS) {
+            loader_out(L"error: invalid kernel allocation could not be released\r\n");
+        }
+        loader_out(L"error: firmware returned an invalid kernel memory range\r\n");
+        return EFI_LOAD_ERROR;
     }
 
     kernel_destination = (EFI_UINT8 *)(uintptr_t)kernel_address;

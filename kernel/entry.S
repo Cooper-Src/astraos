@@ -4,7 +4,8 @@
 
 _start:
     msr daifset, #0xf
-    ldr x1, =__stack_top
+    adrp x1, __stack_top
+    add x1, x1, :lo12:__stack_top
     mov sp, x1
     bl astra_kernel_main
 

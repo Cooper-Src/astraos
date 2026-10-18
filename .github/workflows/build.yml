@@ -135,6 +135,10 @@ jobs:
             echo "AstraOS kernel startup marker not found in QEMU console log (exit $QEMU_STATUS)." >&2
             exit 1
           fi
+          if grep -q "Kernel base: 0x0000000040200000" build/qemu-boot.log; then
+            echo "UEFI loaded the kernel at its link address; relocation was not exercised." >&2
+            exit 1
+          fi
           if ! grep -q "root@astra:/#" build/qemu-boot.log; then
             echo "Kernel did not reach the interactive root prompt." >&2
             exit 1

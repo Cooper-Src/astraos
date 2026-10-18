@@ -7,9 +7,9 @@ AstraOS is an experimental from-scratch ARM64 operating-system project. The curr
 ## Current architecture
 
 - `EFI/BOOT/BOOTAA64.EFI`: AArch64 PE/COFF UEFI loader.
-- `kernel.bin`: flat freestanding AArch64 kernel linked at `0x40200000`.
+- `kernel.bin`: flat freestanding AArch64 kernel linked at `0x40200000` for stable symbols; the UEFI loader can load it at a different page-aligned physical address.
 - `kernel.elf`: ELF kernel build for symbol inspection and debugging.
-- UEFI loader reads `kernel.bin` from the FAT ESP, reserves a fixed 2 MiB load region, copies/zeros kernel memory, captures the UEFI memory map and optional GOP framebuffer metadata, and captures the standard UEFI device-tree configuration table when present. The loader validates the FDT header, block ranges, and reservation map before calling `ExitBootServices` and transferring control to the kernel.
+- UEFI loader reads `kernel.bin` from the FAT ESP, allocates a 2 MiB region at a firmware-selected physical address, copies/zeros kernel memory, captures the UEFI memory map and optional GOP framebuffer metadata, and captures the standard UEFI device-tree configuration table when present. It validates the FDT header, block ranges, and reservation map before calling `ExitBootServices`. The kernel entry computes its initial stack using PC-relative instructions so a page-aligned load away from the link address is supported.
 - Kernel entry installs its own stack and masks interrupts. It owns a bounded shell, an in-memory VFS, a physical-page allocator, a polling PL011 serial driver, and a software-rendered text console for supported GOP framebuffer formats.
 - The fixed-size VFS has bounded path/content interfaces and owner/mode checks. The early page allocator parses UEFI descriptors, tracks conventional 4 KiB pages with bitmaps, rejects overlapping memory ranges, reserves page zero, and currently manages physical memory below 4 GiB.
 - `kernel/fdt.[ch]` validates FDT v17-compatible headers, size/offset arithmetic, non-overlapping blocks, and the reservation-map terminator. The kernel revalidates the passed blob and can safely read the root `model` property. Sanitizer tests cover malformed headers, block ranges, and property bounds.
@@ -26,7 +26,7 @@ Build from the repository root:
 
     bash ./scripts/build.sh
 
-The build uses strict compiler warnings and rejects undefined kernel symbols. Outputs are:
+The build uses strict compiler warnings and rejects undefined kernel symbols. CI also requires a QEMU boot with the kernel loaded away from its link address. Outputs are:
 
 - `build/astraos-aarch64.iso` — UEFI-bootable optical-disc image.
 - `build/astraos-aarch64-esp.img` — FAT EFI system partition image.
