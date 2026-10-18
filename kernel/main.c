@@ -514,7 +514,7 @@ static void command_dispatch(const char *command, size_t command_len,
 enum { DEVICE_TREE_MODEL_DISPLAY_CAP = 128u };
 
 static void print_device_tree_info(const AstraBootInfo *boot_info) {
-    AstraFdtView view = {0};
+    AstraFdtView view;
     AstraFdtResult result = ASTRA_FDT_OK;
     const uint8_t *model = NULL;
     size_t model_length = 0;
