@@ -39,10 +39,17 @@ clang \
   -fno-unwind-tables -fno-asynchronous-unwind-tables \
   "${WARN_FLAGS[@]}" \
   -c "$ROOT/src/boot/efi_main.c" -o "$BUILD/objects/efi_main.obj"
+clang \
+  --target=aarch64-pc-windows-msvc \
+  -std=c17 -ffreestanding -fno-builtin \
+  -fno-stack-protector -fno-exceptions \
+  -fno-unwind-tables -fno-asynchronous-unwind-tables \
+  "${WARN_FLAGS[@]}" \
+  -c "$ROOT/kernel/fdt.c" -o "$BUILD/objects/fdt_efi.obj"
 
 lld-link \
   /subsystem:efi_application /entry:efi_main /machine:arm64 /nodefaultlib \
-  /out:"$EFI_APP" "$BUILD/objects/efi_main.obj"
+  /out:"$EFI_APP" "$BUILD/objects/efi_main.obj" "$BUILD/objects/fdt_efi.obj"
 
 EFI_DESCRIPTION="$(file "$EFI_APP")"
 printf '%s\n' "$EFI_DESCRIPTION"
@@ -79,6 +86,7 @@ clang "${KERNEL_FLAGS[@]}" -c "$ROOT/kernel/vfs.c" -o "$BUILD/objects/vfs.o"
 clang "${KERNEL_FLAGS[@]}" -c "$ROOT/kernel/memory.c" -o "$BUILD/objects/memory.o"
 clang "${KERNEL_FLAGS[@]}" -c "$ROOT/kernel/uart.c" -o "$BUILD/objects/uart.o"
 clang "${KERNEL_FLAGS[@]}" -c "$ROOT/kernel/framebuffer.c" -o "$BUILD/objects/framebuffer.o"
+clang "${KERNEL_FLAGS[@]}" -c "$ROOT/kernel/fdt.c" -o "$BUILD/objects/fdt.o"
 clang --target=aarch64-none-elf -ffreestanding -fno-pic -fno-pie \
   -mcpu=cortex-a72 -c "$ROOT/kernel/entry.S" -o "$BUILD/objects/entry.o"
 
@@ -89,6 +97,7 @@ KERNEL_OBJECTS=(
   "$BUILD/objects/memory.o"
   "$BUILD/objects/uart.o"
   "$BUILD/objects/framebuffer.o"
+  "$BUILD/objects/fdt.o"
 )
 
 ld.lld -T "$ROOT/kernel/linker.ld" -o "$BUILD/kernel.elf" "${KERNEL_OBJECTS[@]}"
