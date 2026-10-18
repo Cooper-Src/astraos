@@ -55,6 +55,7 @@ To use a headless serial-only session, replace `-display default` with `-display
     help
     about
     uname
+    platform
     mem
     palloc
     pfree 0x40001000
@@ -80,7 +81,7 @@ The `palloc` command reserves one 4 KiB physical page; `pfree HEX_ADDRESS` retur
 
 The kernel is freestanding, but not hardened for multi-user use. UID and mode checks are enforced inside one address space and can be bypassed by kernel code. No process isolation, syscall boundary, scheduler, or credentials store exist yet.
 
-The GOP console uses firmware-provided linear framebuffer metadata after `ExitBootServices`; it does not call firmware services while the kernel runs. Whether that framebuffer is safe to use depends on the firmware's handoff and memory mapping. The kernel can accept the FDT configuration table defined by UEFI, but it does not yet select among multiple vendor-packed DTBs or enumerate/initialize devices from the tree. The input and PL011 UART path remain QEMU-virt-specific. Real hardware needs boot-time ACPI/device-tree discovery, physical mapping validation, timers/interrupt controllers, native UART or USB HID input, and platform-specific drivers. A successful QEMU boot is not proof of a successful boot on a laptop or phone.
+The GOP console uses firmware-provided linear framebuffer metadata after `ExitBootServices`; it does not call firmware services while the kernel runs. Whether that framebuffer is safe to use depends on the firmware's handoff and memory mapping. The kernel validates the UEFI FDT configuration table and the `platform` command reports the root model and compatible strings using bounded serial output. Device enumeration and initialization from the tree are not implemented yet. The input and PL011 UART path remain QEMU-virt-specific. Real hardware needs boot-time ACPI/device-tree discovery, physical mapping validation, timers/interrupt controllers, native UART or USB HID input, and platform-specific drivers. A successful QEMU boot is not proof of a successful boot on a laptop or phone.
 
 ## Roadmap
 

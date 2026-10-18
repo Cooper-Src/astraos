@@ -291,6 +291,8 @@ static void command_chmod(const char *args, size_t args_len) {
     astra_uart_puts("permissions updated\n");
 }
 
+static void print_device_tree_info(const AstraBootInfo *boot_info);
+
 static void command_dispatch(const char *command, size_t command_len,
     const char *args, size_t args_len, const AstraBootInfo *boot_info) {
     AstraVfsResult result = ASTRA_VFS_OK;
@@ -298,8 +300,8 @@ static void command_dispatch(const char *command, size_t command_len,
     if (token_equals(command, command_len, "help")) {
         astra_uart_puts(
             "AstraOS kernel commands:\n"
-            "  help, about, uname, mem, palloc, pfree HEX_ADDRESS\n"
-            "  clear, halt\n"
+            "  help, about, uname, platform, mem\n"
+            "  palloc, pfree HEX_ADDRESS, clear, halt\n"
             "  pwd, ls [PATH], cd PATH, cat PATH\n"
             "  touch PATH, mkdir PATH, write PATH TEXT, rm PATH\n"
             "  chmod OCTAL PATH, whoami, id, su astra\n"
@@ -313,6 +315,13 @@ static void command_dispatch(const char *command, size_t command_len,
         );
     } else if (token_equals(command, command_len, "uname")) {
         astra_uart_puts("AstraOS astra-aarch64 0.2 kernel\n");
+    } else if (token_equals(command, command_len, "platform")) {
+        if (args_len != 0u) {
+            astra_uart_puts("usage: platform\n");
+            return;
+        }
+        astra_uart_puts("Platform diagnostics:\n");
+        print_device_tree_info(boot_info);
     } else if (token_equals(command, command_len, "mem")) {
         AstraMemoryStats stats = {0};
         AstraMemoryResult memory_result = ASTRA_MEMORY_OK;
@@ -511,13 +520,15 @@ static void command_dispatch(const char *command, size_t command_len,
     }
 }
 
-enum { DEVICE_TREE_MODEL_DISPLAY_CAP = 128u };
+enum { DEVICE_TREE_PROPERTY_DISPLAY_CAP = 128u };
 
 static void print_device_tree_info(const AstraBootInfo *boot_info) {
-    AstraFdtView view;
+    AstraFdtView view = {0};
     AstraFdtResult result = ASTRA_FDT_OK;
     const uint8_t *model = NULL;
     size_t model_length = 0;
+    const uint8_t *compatible = NULL;
+    size_t compatible_length = 0;
 
     if (boot_info == NULL || boot_info->device_tree_base == 0u ||
         boot_info->device_tree_size == 0u ||
@@ -541,28 +552,60 @@ static void print_device_tree_info(const AstraBootInfo *boot_info) {
 
     astra_uart_puts("Firmware device tree validated.\n");
     result = astra_fdt_root_property(&view, "model", 5u, &model, &model_length);
-    if (result != ASTRA_FDT_OK) {
-        if (result != ASTRA_FDT_PROPERTY_NOT_FOUND) {
-            astra_uart_puts("Warning: could not read device-tree model: ");
-            astra_uart_puts(astra_fdt_result_name(result));
-            astra_uart_puts("\n");
+    if (result == ASTRA_FDT_OK) {
+        astra_uart_puts("Device model: ");
+        for (size_t i = 0; i < model_length &&
+            i < (size_t)DEVICE_TREE_PROPERTY_DISPLAY_CAP; i++) {
+            uint8_t byte = model[i];
+
+            if (byte == 0u) {
+                break;
+            }
+            if (byte >= (uint8_t)' ' && byte <= (uint8_t)'~') {
+                astra_uart_put_byte(byte);
+            } else {
+                astra_uart_put_byte((uint8_t)'?');
+            }
         }
-        return;
+        astra_uart_puts("\n");
+    } else if (result != ASTRA_FDT_PROPERTY_NOT_FOUND) {
+        astra_uart_puts("Warning: could not read device-tree model: ");
+        astra_uart_puts(astra_fdt_result_name(result));
+        astra_uart_puts("\n");
     }
 
-    astra_uart_puts("Device model: ");
-    for (size_t i = 0; i < model_length && i < (size_t)DEVICE_TREE_MODEL_DISPLAY_CAP; i++) {
-        uint8_t byte = model[i];
-        if (byte == 0u) {
-            break;
+    result = astra_fdt_root_property(&view, "compatible", 10u,
+        &compatible, &compatible_length);
+    if (result == ASTRA_FDT_OK) {
+        size_t display_length = compatible_length;
+        astra_uart_puts("Device compatible: ");
+        if (display_length > (size_t)DEVICE_TREE_PROPERTY_DISPLAY_CAP) {
+            display_length = (size_t)DEVICE_TREE_PROPERTY_DISPLAY_CAP;
         }
-        if (byte >= (uint8_t)' ' && byte <= (uint8_t)'~') {
-            astra_uart_put_byte(byte);
-        } else {
-            astra_uart_put_byte((uint8_t)'?');
+        for (size_t i = 0; i < display_length; i++) {
+            uint8_t byte = compatible[i];
+
+            if (byte == 0u) {
+                if (i + 1u < compatible_length && i + 1u < display_length) {
+                    astra_uart_puts(", ");
+                }
+            } else if (byte >= (uint8_t)' ' && byte <= (uint8_t)'~') {
+                astra_uart_put_byte(byte);
+            } else {
+                astra_uart_put_byte((uint8_t)'?');
+            }
         }
+        if (compatible_length > display_length) {
+            astra_uart_puts("...");
+        }
+        astra_uart_puts("\n");
+    } else if (result == ASTRA_FDT_PROPERTY_NOT_FOUND) {
+        astra_uart_puts("Device compatible: not provided\n");
+    } else {
+        astra_uart_puts("Warning: could not read device-tree compatible: ");
+        astra_uart_puts(astra_fdt_result_name(result));
+        astra_uart_puts("\n");
     }
-    astra_uart_puts("\n");
 }
 
 void astra_kernel_main(const AstraBootInfo *boot_info) {
