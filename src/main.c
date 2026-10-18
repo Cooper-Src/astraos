@@ -97,7 +97,7 @@ static EFI_STATUS gOutputError = EFI_SUCCESS;
 
 static void out(const CHAR16 *s) {
     enum { OUTPUT_CHUNK_CAP = 128 };
-    CHAR16 chunk[OUTPUT_CHUNK_CAP] = {0};
+    CHAR16 chunk[OUTPUT_CHUNK_CAP];
     UINTN i = 0;
     EFI_STATUS status = EFI_SUCCESS;
 
@@ -163,7 +163,7 @@ static int child_find(int parent,const CHAR16 *name) {
 }
 
 static int resolve_path(const CHAR16 *path) {
-    CHAR16 part[NAME_CAP] = {0};
+    CHAR16 part[NAME_CAP];
     UINTN j = 0;
     int cur = 0;
     const CHAR16 *p = path;
@@ -278,8 +278,8 @@ static void cmd_create(const CHAR16 *path, BOOLEAN directory) {
     CHAR16 *base_src = NULL;
     UINTN i = 0;
     UINTN n = s_len(path);
-    CHAR16 base[NAME_CAP] = {0};
-    CHAR16 parent_path[LINE_CAP] = {0};
+    CHAR16 base[NAME_CAP];
+    CHAR16 parent_path[LINE_CAP];
 
     if (path == NULL || *path == 0) {
         error(L"path required");
@@ -483,10 +483,12 @@ static void dispatch(CHAR16 *line) {
 EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *systemTable);
 
 EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *systemTable) {
-    EFI_INPUT_KEY key = {0};
+    EFI_INPUT_KEY key;
     EFI_STATUS status = EFI_SUCCESS;
     UINTN len = 0;
     (void)image;
+    key.ScanCode = 0;
+    key.UnicodeChar = 0;
 
     if (systemTable == NULL || systemTable->ConOut == NULL ||
         systemTable->ConIn == NULL ||
