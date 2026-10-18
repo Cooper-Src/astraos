@@ -1,0 +1,481 @@
+#include "boot_info.h"
+#include "uart.h"
+#include "vfs.h"
+
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
+
+enum { KERNEL_LINE_CAP = 256 };
+
+static AstraVfs g_vfs;
+
+static size_t text_length(const char *text) {
+    size_t length = 0;
+
+    if (text == NULL) {
+        return 0;
+    }
+    while (text[length] != '\0') {
+        length++;
+    }
+    return length;
+}
+
+static bool token_equals(const char *token, size_t token_len, const char *expected) {
+    size_t expected_len = text_length(expected);
+
+    if (token == NULL || token_len != expected_len) {
+        return false;
+    }
+    for (size_t i = 0; i < token_len; i++) {
+        if (token[i] != expected[i]) {
+            return false;
+        }
+    }
+    return true;
+}
+
+static const char *username(uint32_t uid) {
+    if (uid == (uint32_t)ASTRA_VFS_ROOT_UID) {
+        return "root";
+    }
+    if (uid == (uint32_t)ASTRA_VFS_ASTRA_UID) {
+        return "astra";
+    }
+    return "unknown";
+}
+
+static void print_mode(uint16_t mode, bool is_directory) {
+    char permissions[10];
+
+    permissions[0] = is_directory ? 'd' : '-';
+    permissions[1] = (mode & 0400u) != 0 ? 'r' : '-';
+    permissions[2] = (mode & 0200u) != 0 ? 'w' : '-';
+    permissions[3] = (mode & 0100u) != 0 ? 'x' : '-';
+    permissions[4] = (mode & 0040u) != 0 ? 'r' : '-';
+    permissions[5] = (mode & 0020u) != 0 ? 'w' : '-';
+    permissions[6] = (mode & 0010u) != 0 ? 'x' : '-';
+    permissions[7] = (mode & 0004u) != 0 ? 'r' : '-';
+    permissions[8] = (mode & 0002u) != 0 ? 'w' : '-';
+    permissions[9 - 1] = (mode & 0001u) != 0 ? 'x' : '-';
+    astra_uart_write(permissions, sizeof permissions);
+}
+
+static void print_entry(const AstraVfsEntry *entry) {
+    print_mode(entry->mode, entry->is_directory);
+    astra_uart_puts("  ");
+    astra_uart_puts(username(entry->owner_uid));
+    astra_uart_puts("  ");
+    astra_uart_puts(entry->name);
+    if (entry->is_directory) {
+        astra_uart_put_byte((uint8_t)'/');
+    } else {
+        astra_uart_puts("  ");
+        astra_uart_put_u32((uint32_t)entry->size);
+    }
+    astra_uart_puts("\n");
+}
+
+static void print_result(AstraVfsResult result) {
+    astra_uart_puts("error: ");
+    astra_uart_puts(astra_vfs_result_name(result));
+    astra_uart_puts("\n");
+}
+
+static size_t skip_spaces(const char *line, size_t length, size_t start) {
+    while (start < length && (line[start] == ' ' || line[start] == '\t')) {
+        start++;
+    }
+    return start;
+}
+
+static bool parse_command(
+    char *line,
+    size_t line_len,
+    char **command_out,
+    size_t *command_len_out,
+    char **args_out,
+    size_t *args_len_out
+) {
+    size_t command_start = 0;
+    size_t command_end = 0;
+    size_t args_start = 0;
+    size_t args_end = line_len;
+
+    if (line == NULL || command_out == NULL || command_len_out == NULL ||
+        args_out == NULL || args_len_out == NULL) {
+        return false;
+    }
+
+    command_start = skip_spaces(line, line_len, 0);
+    if (command_start == line_len) {
+        return false;
+    }
+    command_end = command_start;
+    while (command_end < line_len && line[command_end] != ' ' &&
+        line[command_end] != '\t') {
+        command_end++;
+    }
+
+    *command_out = &line[command_start];
+    *command_len_out = command_end - command_start;
+    line[command_end] = '\0';
+
+    args_start = skip_spaces(line, line_len, command_end);
+    while (args_end > args_start &&
+        (line[args_end - 1u] == ' ' || line[args_end - 1u] == '\t')) {
+        args_end--;
+    }
+    line[args_end] = '\0';
+    *args_out = &line[args_start];
+    *args_len_out = args_end - args_start;
+    return true;
+}
+
+static bool parse_octal(
+    const char *text,
+    size_t text_len,
+    uint16_t *mode_out
+) {
+    uint32_t value = 0;
+
+    if (text == NULL || mode_out == NULL || text_len == 0) {
+        return false;
+    }
+    for (size_t i = 0; i < text_len; i++) {
+        uint32_t digit = 0;
+        if (text[i] < '0' || text[i] > '7') {
+            return false;
+        }
+        digit = (uint32_t)(text[i] - '0');
+        if (value > (07777u - digit) / 8u) {
+            return false;
+        }
+        value = (value * 8u) + digit;
+    }
+    *mode_out = (uint16_t)value;
+    return true;
+}
+
+static void command_ls(const char *path, size_t path_len) {
+    AstraVfsEntry entries[ASTRA_VFS_MAX_NODES];
+    size_t count = 0;
+    AstraVfsResult result = astra_vfs_list(
+        &g_vfs, path, path_len, entries, ASTRA_VFS_MAX_NODES, &count
+    );
+
+    if (result != ASTRA_VFS_OK) {
+        print_result(result);
+        return;
+    }
+    astra_uart_puts("MODE        OWNER   NAME / SIZE\n");
+    for (size_t i = 0; i < count; i++) {
+        print_entry(&entries[i]);
+    }
+}
+
+static void command_cat(const char *path, size_t path_len) {
+    char content[ASTRA_VFS_CONTENT_CAP];
+    size_t content_len = 0;
+    AstraVfsResult result = astra_vfs_read(
+        &g_vfs, path, path_len, content, sizeof content, &content_len
+    );
+
+    if (result != ASTRA_VFS_OK) {
+        print_result(result);
+        return;
+    }
+    astra_uart_write(content, content_len);
+    if (content_len == 0 || content[content_len - 1u] != '\n') {
+        astra_uart_puts("\n");
+    }
+}
+
+static void command_write(const char *args, size_t args_len) {
+    size_t separator = 0;
+    size_t text_start = 0;
+    AstraVfsResult result = ASTRA_VFS_OK;
+
+    while (separator < args_len && args[separator] != ' ' && args[separator] != '\t') {
+        separator++;
+    }
+    if (separator == 0 || separator == args_len) {
+        astra_uart_puts("usage: write PATH TEXT\n");
+        return;
+    }
+
+    text_start = skip_spaces(args, args_len, separator);
+    result = astra_vfs_write(
+        &g_vfs,
+        args,
+        separator,
+        &args[text_start],
+        args_len - text_start
+    );
+    if (result != ASTRA_VFS_OK) {
+        print_result(result);
+        return;
+    }
+    astra_uart_puts("written\n");
+}
+
+static void command_chmod(const char *args, size_t args_len) {
+    size_t separator = 0;
+    size_t path_start = 0;
+    uint16_t mode = 0;
+    AstraVfsResult result = ASTRA_VFS_OK;
+
+    while (separator < args_len && args[separator] != ' ' && args[separator] != '\t') {
+        separator++;
+    }
+    if (separator == 0 || separator == args_len ||
+        !parse_octal(args, separator, &mode)) {
+        astra_uart_puts("usage: chmod OCTAL PATH\n");
+        return;
+    }
+    path_start = skip_spaces(args, args_len, separator);
+    if (path_start == args_len) {
+        astra_uart_puts("usage: chmod OCTAL PATH\n");
+        return;
+    }
+
+    result = astra_vfs_chmod(&g_vfs, &args[path_start], args_len - path_start, mode);
+    if (result != ASTRA_VFS_OK) {
+        print_result(result);
+        return;
+    }
+    astra_uart_puts("permissions updated\n");
+}
+
+static void command_dispatch(const char *command, size_t command_len,
+    const char *args, size_t args_len, const AstraBootInfo *boot_info) {
+    AstraVfsResult result = ASTRA_VFS_OK;
+
+    if (token_equals(command, command_len, "help")) {
+        astra_uart_puts(
+            "AstraOS kernel commands:\n"
+            "  help, about, uname, mem, clear, halt\n"
+            "  pwd, ls [PATH], cd PATH, cat PATH\n"
+            "  touch PATH, mkdir PATH, write PATH TEXT, rm PATH\n"
+            "  chmod OCTAL PATH, whoami, id, su astra\n"
+            "Files live in RAM and reset at reboot.\n"
+        );
+    } else if (token_equals(command, command_len, "about")) {
+        astra_uart_puts(
+            "AstraOS kernel 0.2: freestanding AArch64 kernel.\n"
+            "UEFI is used only for boot and the memory-map handoff.\n"
+            "The console uses QEMU virt PL011 UART; hardware support is early.\n"
+        );
+    } else if (token_equals(command, command_len, "uname")) {
+        astra_uart_puts("AstraOS astra-aarch64 0.2 kernel\n");
+    } else if (token_equals(command, command_len, "mem")) {
+        if (boot_info == NULL) {
+            astra_uart_puts("boot information unavailable\n");
+            return;
+        }
+        astra_uart_puts("kernel base: ");
+        astra_uart_put_hex(boot_info->kernel_base);
+        astra_uart_puts("\nimage bytes: ");
+        astra_uart_put_u32((uint32_t)boot_info->kernel_image_size);
+        astra_uart_puts("\nUEFI map bytes: ");
+        astra_uart_put_u32((uint32_t)boot_info->memory_map_size);
+        astra_uart_puts("\ndescriptor bytes: ");
+        astra_uart_put_u32((uint32_t)boot_info->memory_descriptor_size);
+        astra_uart_puts("\n");
+    } else if (token_equals(command, command_len, "clear")) {
+        astra_uart_puts("\x1b[2J\x1b[H");
+    } else if (token_equals(command, command_len, "halt")) {
+        astra_uart_puts("AstraOS halted. Reset the machine to reboot.\n");
+        for (;;) {
+            __asm__ volatile("wfe");
+        }
+    } else if (token_equals(command, command_len, "pwd")) {
+        char path[ASTRA_VFS_PATH_CAP];
+        size_t written = 0;
+        result = astra_vfs_pwd(&g_vfs, path, sizeof path, &written);
+        if (result != ASTRA_VFS_OK) {
+            print_result(result);
+            return;
+        }
+        astra_uart_write(path, written);
+        astra_uart_puts("\n");
+    } else if (token_equals(command, command_len, "ls")) {
+        command_ls(args_len == 0 ? "/" : args, args_len == 0 ? 1u : args_len);
+    } else if (token_equals(command, command_len, "cd")) {
+        if (args_len == 0) {
+            astra_uart_puts("usage: cd PATH\n");
+            return;
+        }
+        result = astra_vfs_chdir(&g_vfs, args, args_len);
+        if (result != ASTRA_VFS_OK) {
+            print_result(result);
+        }
+    } else if (token_equals(command, command_len, "cat")) {
+        if (args_len == 0) {
+            astra_uart_puts("usage: cat PATH\n");
+            return;
+        }
+        command_cat(args, args_len);
+    } else if (token_equals(command, command_len, "touch")) {
+        if (args_len == 0) {
+            astra_uart_puts("usage: touch PATH\n");
+            return;
+        }
+        result = astra_vfs_create(&g_vfs, args, args_len, false);
+        if (result != ASTRA_VFS_OK) {
+            print_result(result);
+        } else {
+            astra_uart_puts("file created\n");
+        }
+    } else if (token_equals(command, command_len, "mkdir")) {
+        if (args_len == 0) {
+            astra_uart_puts("usage: mkdir PATH\n");
+            return;
+        }
+        result = astra_vfs_create(&g_vfs, args, args_len, true);
+        if (result != ASTRA_VFS_OK) {
+            print_result(result);
+        } else {
+            astra_uart_puts("directory created\n");
+        }
+    } else if (token_equals(command, command_len, "write")) {
+        command_write(args, args_len);
+    } else if (token_equals(command, command_len, "rm")) {
+        if (args_len == 0) {
+            astra_uart_puts("usage: rm PATH\n");
+            return;
+        }
+        result = astra_vfs_remove(&g_vfs, args, args_len);
+        if (result != ASTRA_VFS_OK) {
+            print_result(result);
+        } else {
+            astra_uart_puts("removed\n");
+        }
+    } else if (token_equals(command, command_len, "chmod")) {
+        command_chmod(args, args_len);
+    } else if (token_equals(command, command_len, "whoami")) {
+        uint32_t uid = 0;
+        result = astra_vfs_get_uid(&g_vfs, &uid);
+        if (result != ASTRA_VFS_OK) {
+            print_result(result);
+            return;
+        }
+        astra_uart_puts(username(uid));
+        astra_uart_puts("\n");
+    } else if (token_equals(command, command_len, "id")) {
+        uint32_t uid = 0;
+        result = astra_vfs_get_uid(&g_vfs, &uid);
+        if (result != ASTRA_VFS_OK) {
+            print_result(result);
+            return;
+        }
+        astra_uart_puts("uid=");
+        astra_uart_put_u32(uid);
+        astra_uart_puts("(");
+        astra_uart_puts(username(uid));
+        astra_uart_puts(") gid=");
+        astra_uart_put_u32(uid);
+        astra_uart_puts("(");
+        astra_uart_puts(username(uid));
+        astra_uart_puts(")\n");
+    } else if (token_equals(command, command_len, "su")) {
+        if (token_equals(args, args_len, "astra")) {
+            result = astra_vfs_set_uid(&g_vfs, (uint32_t)ASTRA_VFS_ASTRA_UID);
+            if (result != ASTRA_VFS_OK) {
+                print_result(result);
+            } else {
+                astra_uart_puts("switched to unprivileged user astra\n");
+            }
+        } else {
+            astra_uart_puts("authentication is not implemented; use 'su astra'\n");
+        }
+    } else if (token_equals(command, command_len, "echo")) {
+        astra_uart_write(args, args_len);
+        astra_uart_puts("\n");
+    } else if (token_equals(command, command_len, "exit")) {
+        astra_uart_puts("The kernel cannot return to UEFI. Use 'halt' to stop.\n");
+    } else {
+        astra_uart_puts("unknown command; type help\n");
+    }
+}
+
+void astra_kernel_main(const AstraBootInfo *boot_info) {
+    char line[KERNEL_LINE_CAP];
+    AstraVfsResult result = ASTRA_VFS_OK;
+
+    astra_uart_init();
+    astra_uart_puts("\n================================\n");
+    astra_uart_puts("          ASTRAOS KERNEL\n");
+    astra_uart_puts("================================\n");
+    astra_uart_puts("AstraOS kernel 0.2 | AArch64 freestanding\n");
+    if (boot_info != NULL && boot_info->magic == ASTRA_BOOT_INFO_MAGIC) {
+        astra_uart_puts("UEFI boot-services handoff completed.\n");
+        astra_uart_puts("Kernel base: ");
+        astra_uart_put_hex(boot_info->kernel_base);
+        astra_uart_puts("\n");
+    } else {
+        astra_uart_puts("warning: boot information did not validate\n");
+    }
+
+    result = astra_vfs_init(&g_vfs);
+    if (result != ASTRA_VFS_OK) {
+        print_result(result);
+        for (;;) {
+            __asm__ volatile("wfe");
+        }
+    }
+
+    line[0] = '\0';
+    for (;;) {
+        char *command = NULL;
+        char *args = NULL;
+        size_t command_len = 0;
+        size_t args_len = 0;
+        size_t line_len = 0;
+        uint32_t uid = 0;
+        char path[ASTRA_VFS_PATH_CAP];
+        size_t path_len = 0;
+
+        if (astra_vfs_get_uid(&g_vfs, &uid) != ASTRA_VFS_OK) {
+            uid = (uint32_t)ASTRA_VFS_ROOT_UID;
+        }
+        astra_uart_puts(username(uid));
+        astra_uart_puts("@astra:");
+        if (astra_vfs_pwd(&g_vfs, path, sizeof path, &path_len) == ASTRA_VFS_OK) {
+            astra_uart_write(path, path_len);
+        } else {
+            astra_uart_puts("?");
+        }
+        astra_uart_puts(uid == (uint32_t)ASTRA_VFS_ROOT_UID ? "# " : "$ ");
+
+        line_len = 0;
+        line[0] = '\0';
+        for (;;) {
+            uint8_t input = astra_uart_get_byte();
+            if (input == (uint8_t)'\r' || input == (uint8_t)'\n') {
+                astra_uart_puts("\n");
+                break;
+            }
+            if (input == 0x08u || input == 0x7fu) {
+                if (line_len > 0) {
+                    line_len--;
+                    line[line_len] = '\0';
+                    astra_uart_puts("\b \b");
+                }
+                continue;
+            }
+            if (input >= 0x20u && input < 0x7fu &&
+                line_len + 1u < sizeof line) {
+                line[line_len] = (char)input;
+                line_len++;
+                line[line_len] = '\0';
+                astra_uart_put_byte(input);
+            }
+        }
+
+        if (parse_command(line, line_len, &command, &command_len, &args, &args_len)) {
+            command_dispatch(command, command_len, args, args_len, boot_info);
+        }
+    }
+}
