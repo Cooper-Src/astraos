@@ -16,6 +16,7 @@ typedef unsigned long long UINTN;
 #define EFIAPI
 #define EFI_SUCCESS 0
 #define EFI_INVALID_PARAMETER 0x8000000000000002ULL
+#define EFI_OUT_OF_RESOURCES 0x8000000000000009ULL
 #define EFI_NOT_READY 0x8000000000000006ULL
 #define TRUE 1
 #define FALSE 0
@@ -231,23 +232,84 @@ static BOOLEAN valid_parent_for_write(int node) {
     }
     return can_access(&gNodes[parent], 3u);
 }
-static void fs_init(void) {
-    UINTN i; for(i=0;i<MAX_NODES;i++)gNodes[i].used=FALSE;
-    gNodes[0].used=TRUE;gNodes[0].directory=TRUE;gNodes[0].owner=ROOT_UID;gNodes[0].mode=0755;gNodes[0].parent=0;s_copy(gNodes[0].name,L"/",NAME_CAP);
-    node_add(0,L"etc",TRUE,ROOT_UID,0755,L"");
-    node_add(0,L"home",TRUE,ROOT_UID,0755,L"");
-    node_add(0,L"tmp",TRUE,ROOT_UID,01777,L"");
-    node_add(0,L"README.txt",FALSE,ROOT_UID,0644,L"Welcome to AstraOS. This is an early UEFI-native live prototype.\r\nThe RAM filesystem is temporary and resets after reboot.\r\nType 'help' to see commands.\r\n");
-    node_add(1,L"motd",FALSE,ROOT_UID,0644,L"AstraOS alpha - welcome.\r\n");
-    node_add(2,L"astra",TRUE,ASTRA_UID,0750,L"");
-    node_add(6,L"notes.txt",FALSE,ASTRA_UID,0640,L"This file belongs to astra.\r\n");
-    gCwd=0;gUid=ROOT_UID;
+static BOOLEAN fs_init(void) {
+    int etc = -1;
+    int home = -1;
+    int tmp = -1;
+    int readme = -1;
+    int astra_home = -1;
+    UINTN i = 0;
+
+    for (i = 0; i < MAX_NODES; i++) {
+        gNodes[i].used = FALSE;
+    }
+
+    gNodes[0].used = TRUE;
+    gNodes[0].directory = TRUE;
+    gNodes[0].owner = ROOT_UID;
+    gNodes[0].mode = 0755u;
+    gNodes[0].parent = 0;
+    s_copy(gNodes[0].name, L"/", NAME_CAP);
+
+    etc = node_add(0, L"etc", TRUE, ROOT_UID, 0755u, L"");
+    home = node_add(0, L"home", TRUE, ROOT_UID, 0755u, L"");
+    tmp = node_add(0, L"tmp", TRUE, ROOT_UID, 01777u, L"");
+    readme = node_add(
+        0,
+        L"README.txt",
+        FALSE,
+        ROOT_UID,
+        0644u,
+        L"Welcome to AstraOS. This is an early UEFI-native live prototype.\r\n"
+        L"The RAM filesystem is temporary and resets after reboot.\r\n"
+        L"Type 'help' to see commands.\r\n");
+
+    if (etc < 0 || home < 0 || tmp < 0 || readme < 0) {
+        return FALSE;
+    }
+
+    if (node_add(etc, L"motd", FALSE, ROOT_UID, 0644u,
+                 L"AstraOS alpha - welcome.\r\n") < 0) {
+        return FALSE;
+    }
+
+    astra_home = node_add(home, L"astra", TRUE, ASTRA_UID, 0750u, L"");
+    if (astra_home < 0) {
+        return FALSE;
+    }
+    if (node_add(astra_home, L"notes.txt", FALSE, ASTRA_UID, 0640u,
+                 L"This file belongs to astra.\r\n") < 0) {
+        return FALSE;
+    }
+
+    gCwd = 0;
+    gUid = ROOT_UID;
+    return TRUE;
 }
+
 static void print_mode(const VNode *n) {
-    out(n->directory?L"d":L"-");
-    out((n->mode&0400)?L"r":L"-");out((n->mode&0200)?L"w":L"-");out((n->mode&0100)?L"x":L"-");
-    out((n->mode&0040)?L"r":L"-");out((n->mode&0020)?L"w":L"-");out((n->mode&0010)?L"x":L"-");
-    out((n->mode&0004)?L"r":L"-");out((n->mode&0002)?L"w":L"-");out((n->mode&0001)?L"x":L"-");
+    out(n->directory ? L"d" : L"-");
+    out((n->mode & 0400u) != 0 ? L"r" : L"-");
+    out((n->mode & 0200u) != 0 ? L"w" : L"-");
+    if ((n->mode & 04000u) != 0) {
+        out((n->mode & 0100u) != 0 ? L"s" : L"S");
+    } else {
+        out((n->mode & 0100u) != 0 ? L"x" : L"-");
+    }
+    out((n->mode & 0040u) != 0 ? L"r" : L"-");
+    out((n->mode & 0020u) != 0 ? L"w" : L"-");
+    if ((n->mode & 02000u) != 0) {
+        out((n->mode & 0010u) != 0 ? L"s" : L"S");
+    } else {
+        out((n->mode & 0010u) != 0 ? L"x" : L"-");
+    }
+    out((n->mode & 0004u) != 0 ? L"r" : L"-");
+    out((n->mode & 0002u) != 0 ? L"w" : L"-");
+    if ((n->mode & 01000u) != 0) {
+        out((n->mode & 0001u) != 0 ? L"t" : L"T");
+    } else {
+        out((n->mode & 0001u) != 0 ? L"x" : L"-");
+    }
 }
 static void cmd_ls(void) {
     UINTN i; VNode *n=&gNodes[gCwd];
@@ -402,6 +464,10 @@ static void cmd_rm(const CHAR16 *path) {
         error(L"path not found");
         return;
     }
+    if (id == gCwd) {
+        error(L"cannot remove the current working directory");
+        return;
+    }
     if (!valid_parent_for_write(id)) {
         error(L"permission denied");
         return;
@@ -461,7 +527,14 @@ static void dispatch(CHAR16 *line) {
     if(s_cmp(cmd,L"help")==0){out(L"AstraOS alpha commands:\r\n  help, about, uname, clear, exit\r\n  pwd, ls, cd PATH, cat PATH\r\n  touch PATH, mkdir PATH, write PATH TEXT, rm PATH\r\n  chmod OCTAL PATH, whoami, id, su astra\r\n  Note: RAM filesystem resets on reboot.\r\n");}
     else if(s_cmp(cmd,L"about")==0){out(L"AstraOS alpha 0.1 (AArch64 UEFI)\r\nAstraOS-owned shell, RAM VFS and Unix-style permission checks.\r\nUEFI currently provides firmware console I/O; process isolation is not implemented.\r\n");}
     else if(s_cmp(cmd,L"uname")==0){out(L"AstraOS astra-aarch64 0.1 UEFI-native\r\n");}
-    else if(s_cmp(cmd,L"clear")==0){if(gOut->ClearScreen)gOut->ClearScreen(gOut);}
+    else if(s_cmp(cmd,L"clear")==0){
+        if (gOut->ClearScreen != NULL) {
+            EFI_STATUS clear_status = gOut->ClearScreen(gOut);
+            if (clear_status != EFI_SUCCESS) {
+                gOutputError = clear_status;
+            }
+        }
+    }
     else if(s_cmp(cmd,L"exit")==0){out(L"Leaving AstraOS shell.\r\n");gLine[0]=0;s_copy(gLine,L"__exit__",LINE_CAP);}
     else if(s_cmp(cmd,L"pwd")==0)print_pwd();
     else if(s_cmp(cmd,L"ls")==0){if(*args){id=resolve_path(args);if(id<0){error(L"path not found");return;}if(!gNodes[id].directory){out(gNodes[id].name);newline();return;}if(!can_access(&gNodes[id],5)){error(L"permission denied");return;}for(i=1;i<MAX_NODES;i++)if(gNodes[i].used&&gNodes[i].parent==id){out(gNodes[i].name);if(gNodes[i].directory)out(L"/");newline();}}else cmd_ls();}
@@ -499,7 +572,9 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *systemTable) {
     gOut = systemTable->ConOut;
     gIn = systemTable->ConIn;
     gOutputError = EFI_SUCCESS;
-    fs_init();
+    if (!fs_init()) {
+        return EFI_OUT_OF_RESOURCES;
+    }
 
     if (gOut->ClearScreen != NULL) {
         status = gOut->ClearScreen(gOut);
