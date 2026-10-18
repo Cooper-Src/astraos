@@ -44,6 +44,7 @@ SOURCES=(
     "$ROOT/src/main.c"
     "$ROOT/src/kernel/console.c"
     "$ROOT/src/kernel/vfs.c"
+    "$ROOT/src/kernel/memory.c"
     "$ROOT/src/kernel/shell.c"
 )
 OBJECTS=()
