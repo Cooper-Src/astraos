@@ -91,7 +91,34 @@ static void s_copy(CHAR16 *dst, const CHAR16 *src, UINTN cap) {
     UINTN i=0; if(cap==0)return; if(!src){dst[0]=0;return;}
     while(src[i] && i+1<cap){dst[i]=src[i];i++;} dst[i]=0;
 }
-static void out(CHAR16 *s) { if (gOut != NULL && gOut->OutputString != NULL) { (void)gOut->OutputString(gOut, s); } }
+static EFI_STATUS gOutputError = EFI_SUCCESS;
+
+static void out(const CHAR16 *s) {
+    enum { OUTPUT_CHUNK_CAP = 128 };
+    CHAR16 chunk[OUTPUT_CHUNK_CAP] = {0};
+    UINTN i = 0;
+    EFI_STATUS status = EFI_SUCCESS;
+
+    if (s == NULL || gOut == NULL || gOut->OutputString == NULL ||
+        gOutputError != EFI_SUCCESS) {
+        return;
+    }
+
+    while (*s != 0) {
+        i = 0;
+        while (*s != 0 && i + 1u < OUTPUT_CHUNK_CAP) {
+            chunk[i] = *s;
+            i++;
+            s++;
+        }
+        chunk[i] = 0;
+        status = gOut->OutputString(gOut, chunk);
+        if (status != EFI_SUCCESS) {
+            gOutputError = status;
+            return;
+        }
+    }
+}
 static void out_ch(CHAR16 c) { CHAR16 s[2]; s[0]=c;s[1]=0;out(s); }
 static void out_u32(UINT32 v) {
     CHAR16 b[16]; UINTN n=0; if(v==0){out_ch('0');return;}
