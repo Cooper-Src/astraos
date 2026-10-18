@@ -290,7 +290,7 @@ bool astra_acpi_find_pl011_uart(
     if (rsdp[0] != (uint8_t)'R' || rsdp[1] != (uint8_t)'S' ||
         rsdp[2] != (uint8_t)'D' || rsdp[3] != (uint8_t)' ' ||
         rsdp[4] != (uint8_t)'P' || rsdp[5] != (uint8_t)'T' ||
-        rsdp[6] != (uint8_t)'R' || rsdp[7] != 0u ||
+        rsdp[6] != (uint8_t)'R' || rsdp[7] != (uint8_t)' ' ||
         !acpi_checksum_valid(rsdp, (size_t)ACPI_RSDP_V1_SIZE)) {
         return false;
     }
