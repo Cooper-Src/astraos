@@ -122,6 +122,7 @@ static void out(const CHAR16 *s) {
         }
     }
 }
+#endif /* ASTRAOS_TEST */
 static void out_ch(CHAR16 c) { CHAR16 s[2]; s[0]=c;s[1]=0;out(s); }
 static void out_u32(UINT32 v) {
     CHAR16 b[16]; UINTN n=0; if(v==0){out_ch('0');return;}
@@ -143,6 +144,9 @@ static BOOLEAN can_access(const VNode *n, UINT16 bit) {
         return FALSE;
     }
     if (gUid == ROOT_UID) {
+        if ((bit & 1u) != 0 && (n->mode & 0111u) == 0) {
+            return FALSE;
+        }
         return TRUE;
     }
 
@@ -150,12 +154,48 @@ static BOOLEAN can_access(const VNode *n, UINT16 bit) {
                               : (UINT16)(n->mode & 7u);
     return (bits & bit) == bit;
 }
-static int node_add(int parent,const CHAR16 *name,BOOLEAN directory,UINT32 owner,UINT16 mode,const CHAR16 *content) {
-    UINTN i;
-    for(i=1;i<MAX_NODES;i++) if(!gNodes[i].used) {
-        VNode *n=&gNodes[i]; n->used=TRUE;n->directory=directory;n->owner=owner;n->mode=mode;n->parent=parent;
-        s_copy(n->name,name,NAME_CAP);s_copy(n->content,content,CONTENT_CAP);return (int)i;
+static int node_add(
+    int parent,
+    const CHAR16 *name,
+    BOOLEAN directory,
+    UINT32 owner,
+    UINT16 mode,
+    const CHAR16 *content)
+{
+    UINTN i = 0;
+    UINTN name_len = 0;
+
+    if (parent < 0 || parent >= (int)MAX_NODES || name == NULL || content == NULL ||
+        !gNodes[parent].used || !gNodes[parent].directory || mode > 07777u) {
+        return -1;
     }
+
+    name_len = s_len(name);
+    if (name_len == 0 || name_len >= NAME_CAP || s_len(content) >= CONTENT_CAP ||
+        s_cmp(name, L".") == 0 || s_cmp(name, L"..") == 0) {
+        return -1;
+    }
+    for (i = 0; i < name_len; i++) {
+        if (name[i] == '/') {
+            return -1;
+        }
+    }
+
+    for (i = 1; i < MAX_NODES; i++) {
+        if (!gNodes[i].used) {
+            VNode *node = &gNodes[i];
+
+            node->used = TRUE;
+            node->directory = directory;
+            node->owner = owner;
+            node->mode = mode;
+            node->parent = parent;
+            s_copy(node->name, name, NAME_CAP);
+            s_copy(node->content, content, CONTENT_CAP);
+            return (int)i;
+        }
+    }
+
     return -1;
 }
 static int child_find(int parent,const CHAR16 *name) {
@@ -167,12 +207,14 @@ static int resolve_path(const CHAR16 *path) {
     CHAR16 part[NAME_CAP];
     UINTN j = 0;
     int cur = 0;
+    UINTN path_len = 0;
     const CHAR16 *p = path;
 
     if (path == NULL || *path == 0) {
         return gCwd;
     }
 
+    path_len = s_len(path);
     cur = (*p == '/') ? 0 : gCwd;
     while (*p != 0) {
         while (*p == '/') {
@@ -213,8 +255,7 @@ static int resolve_path(const CHAR16 *path) {
         }
     }
 
-    if (s_len(path) > 0 && path[s_len(path) - 1u] == '/' &&
-        !gNodes[cur].directory) {
+    if (path_len > 0 && path[path_len - 1u] == '/' && !gNodes[cur].directory) {
         return -1;
     }
     return cur;
@@ -227,7 +268,8 @@ static BOOLEAN valid_parent_for_write(int node) {
         return FALSE;
     }
     parent = gNodes[node].parent;
-    if (parent < 0 || parent >= MAX_NODES || !gNodes[parent].directory) {
+    if (parent < 0 || parent >= MAX_NODES || !gNodes[parent].used ||
+        !gNodes[parent].directory) {
         return FALSE;
     }
     return can_access(&gNodes[parent], 3u);
@@ -244,6 +286,8 @@ static BOOLEAN fs_init(void) {
         gNodes[i].used = FALSE;
     }
 
+    gCwd = 0;
+    gUid = ROOT_UID;
     gNodes[0].used = TRUE;
     gNodes[0].directory = TRUE;
     gNodes[0].owner = ROOT_UID;
@@ -282,8 +326,6 @@ static BOOLEAN fs_init(void) {
         return FALSE;
     }
 
-    gCwd = 0;
-    gUid = ROOT_UID;
     return TRUE;
 }
 
@@ -553,6 +595,7 @@ static void dispatch(CHAR16 *line) {
     else {found=FALSE;error(L"unknown command (type help)");(void)found;}
 }
 
+#ifndef ASTRAOS_TEST
 EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *systemTable);
 
 EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *systemTable) {
