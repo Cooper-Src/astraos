@@ -87,6 +87,7 @@ typedef EFI_STATUS (EFIAPI *EFI_GET_MEMORY_MAP)(
     EFI_UINT32 *
 );
 typedef EFI_STATUS (EFIAPI *EFI_EXIT_BOOT_SERVICES)(EFI_HANDLE, EFI_UINTN);
+typedef EFI_STATUS (EFIAPI *EFI_LOCATE_PROTOCOL)(EFI_GUID *, void *, void **);
 
 struct EFI_BOOT_SERVICES {
     EFI_TABLE_HEADER Hdr;
@@ -117,6 +118,17 @@ struct EFI_BOOT_SERVICES {
     void *Exit;
     void *UnloadImage;
     EFI_EXIT_BOOT_SERVICES ExitBootServices;
+    void *GetNextMonotonicCount;
+    void *Stall;
+    void *SetWatchdogTimer;
+    void *ConnectController;
+    void *DisconnectController;
+    void *OpenProtocol;
+    void *CloseProtocol;
+    void *OpenProtocolInformation;
+    void *ProtocolsPerHandle;
+    void *LocateHandleBuffer;
+    EFI_LOCATE_PROTOCOL LocateProtocol;
 };
 
 typedef struct EFI_SYSTEM_TABLE {
@@ -134,6 +146,47 @@ typedef struct EFI_SYSTEM_TABLE {
     EFI_UINTN NumberOfTableEntries;
     void *ConfigurationTable;
 } EFI_SYSTEM_TABLE;
+
+
+enum {
+    GOP_PIXEL_RGB_RESERVED = 0,
+    GOP_PIXEL_BGR_RESERVED = 1,
+    GOP_PIXEL_BITMASK = 2,
+    GOP_PIXEL_BLT_ONLY = 3,
+    GOP_MAX_DIMENSION = 8192u
+};
+
+typedef struct EFI_PIXEL_BITMASK {
+    EFI_UINT32 RedMask;
+    EFI_UINT32 GreenMask;
+    EFI_UINT32 BlueMask;
+    EFI_UINT32 ReservedMask;
+} EFI_PIXEL_BITMASK;
+
+typedef struct EFI_GOP_MODE_INFO {
+    EFI_UINT32 Version;
+    EFI_UINT32 HorizontalResolution;
+    EFI_UINT32 VerticalResolution;
+    EFI_UINT32 PixelFormat;
+    EFI_PIXEL_BITMASK PixelInformation;
+    EFI_UINT32 PixelsPerScanLine;
+} EFI_GOP_MODE_INFO;
+
+typedef struct EFI_GOP_MODE {
+    EFI_UINT32 MaxMode;
+    EFI_UINT32 Mode;
+    EFI_GOP_MODE_INFO *Info;
+    EFI_UINTN SizeOfInfo;
+    EFI_UINT64 FrameBufferBase;
+    EFI_UINTN FrameBufferSize;
+} EFI_GOP_MODE;
+
+typedef struct EFI_GRAPHICS_OUTPUT_PROTOCOL {
+    void *QueryMode;
+    void *SetMode;
+    void *Blt;
+    EFI_GOP_MODE *Mode;
+} EFI_GRAPHICS_OUTPUT_PROTOCOL;
 
 struct EFI_LOADED_IMAGE_PROTOCOL {
     EFI_UINT32 Revision;
@@ -171,6 +224,11 @@ static EFI_GUID g_loaded_image_guid = {
 static EFI_GUID g_simple_file_system_guid = {
     0x964e5b22u, 0x6459u, 0x11d2u,
     {0x8eu, 0x39u, 0x00u, 0xa0u, 0xc9u, 0x69u, 0x72u, 0x3bu}
+};
+
+static EFI_GUID g_graphics_output_guid = {
+    0x9042a9deu, 0x23dcu, 0x4a38u,
+    {0x96u, 0xfbu, 0x7au, 0xdeu, 0xd0u, 0x80u, 0x51u, 0x6au}
 };
 static CHAR16 g_kernel_file_name[] = L"kernel.bin";
 static EFI_UINT8 g_kernel_staging[KERNEL_STAGING_CAP];
@@ -406,7 +464,14 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *system_table) {
     g_boot_info.kernel_base = kernel_address;
     g_boot_info.kernel_image_size = (EFI_UINT64)kernel_size;
     g_boot_info.kernel_allocation_size = KERNEL_ALLOCATION_SIZE;
+    clear_framebuffer_info(&g_boot_info);
+    capture_framebuffer(boot_services, &g_boot_info);
 
+    if (g_boot_info.framebuffer_base != 0) {
+        loader_out(L"UEFI GOP framebuffer discovered.\r\n");
+    } else {
+        loader_out(L"No usable GOP framebuffer; serial console remains available.\r\n");
+    }
     loader_out(L"Kernel copied. Capturing the UEFI memory map...\r\n");
     status = EFI_INVALID_PARAMETER;
     for (size_t attempt = 0; attempt < 3u; attempt++) {
