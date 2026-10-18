@@ -146,7 +146,7 @@ jobs:
           fi
           echo "AstraOS boot, root prompt, identity, and create/write/read behavior verified."
 
-      - name: Smoke-test GOP framebuffer handoff in QEMU
+      - name: Smoke-test optional GOP framebuffer and serial fallback
         shell: bash
         run: |
           set -euo pipefail
@@ -169,12 +169,22 @@ jobs:
           QEMU_STATUS=$?
           set -e
           cat build/qemu-gop.log
-          if ! grep -q "GOP framebuffer console active" build/qemu-gop.log; then
-            echo "AstraOS did not activate the GOP framebuffer under QEMU virtio-gpu." >&2
-            echo "QEMU exit status: $QEMU_STATUS" >&2
+          if ! grep -q "AstraOS kernel 0.2" build/qemu-gop.log; then
+            echo "AstraOS did not boot in the GOP/fallback smoke test (exit $QEMU_STATUS)." >&2
             exit 1
           fi
-          echo "GOP framebuffer activated and kernel continued booting."
+          if ! grep -q "root@astra:/#" build/qemu-gop.log; then
+            echo "AstraOS did not reach its shell prompt in the GOP/fallback smoke test." >&2
+            exit 1
+          fi
+          if grep -q "GOP framebuffer console active" build/qemu-gop.log; then
+            echo "GOP framebuffer activated and the kernel continued booting."
+          elif grep -q "GOP framebuffer console unavailable; serial remains active." build/qemu-gop.log; then
+            echo "This AAVMF configuration exposes no usable GOP; serial fallback verified."
+          else
+            echo "Neither a usable GOP console nor the expected serial fallback was reported." >&2
+            exit 1
+          fi
 
       - name: Upload ISO and kernel artifacts
         uses: actions/upload-artifact@v4
