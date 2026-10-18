@@ -447,4 +447,5 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *system_table) {
         entry(&g_boot_info);
     }
     stop_forever();
+    return EFI_ABORTED;
 }
