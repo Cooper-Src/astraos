@@ -1,5 +1,7 @@
 #include "acpi.h"
 
+#include "mmio.h"
+
 #include <stddef.h>
 #include <stdint.h>
 
@@ -252,7 +254,10 @@ static bool acpi_find_spcr_in_root(
             (base_address % sizeof(uint32_t)) != 0u ||
             base_address > UINT64_MAX - (uint64_t)ACPI_PL011_REGISTER_BYTES ||
             base_address > (uint64_t)UINTPTR_MAX -
-                (uint64_t)(ACPI_PL011_REGISTER_BYTES - 1u)) {
+                (uint64_t)(ACPI_PL011_REGISTER_BYTES - 1u) ||
+            !astra_mmio_range_is_valid(
+                boot_info, base_address, (uint64_t)ACPI_PL011_REGISTER_BYTES
+            )) {
             return false;
         }
 

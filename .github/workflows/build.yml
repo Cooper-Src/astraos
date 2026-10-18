@@ -59,6 +59,17 @@ jobs:
             kernel/memory.c tests/memory_tests.c -o /tmp/astraos-memory-tests
           UBSAN_OPTIONS=print_stacktrace=1 /tmp/astraos-memory-tests
 
+      - name: Run MMIO range sanitizer tests
+        run: |
+          clang -std=c17 -g -O0 \
+            -Wall -Wextra -Wpedantic -Wshadow -Wconversion -Wformat=2 \
+            -Wstrict-prototypes -Wmissing-prototypes -Wwrite-strings \
+            -Wcast-qual -Wundef -Wvla -Werror \
+            -fsanitize=address,undefined -fno-sanitize-recover=undefined \
+            -fno-omit-frame-pointer -Ikernel \
+            kernel/mmio.c tests/mmio_tests.c -o /tmp/astraos-mmio-tests
+          UBSAN_OPTIONS=print_stacktrace=1 /tmp/astraos-mmio-tests
+
       - name: Run GOP framebuffer sanitizer tests
         run: |
           clang -std=c17 -g -O0 \
@@ -89,7 +100,7 @@ jobs:
             -Wcast-qual -Wundef -Wvla -Werror \
             -fsanitize=address,undefined -fno-sanitize-recover=undefined \
             -fno-omit-frame-pointer -Ikernel \
-            kernel/acpi.c tests/acpi_tests.c -o /tmp/astraos-acpi-tests
+            kernel/acpi.c kernel/mmio.c tests/acpi_tests.c -o /tmp/astraos-acpi-tests
           UBSAN_OPTIONS=print_stacktrace=1 /tmp/astraos-acpi-tests
 
       - name: Run FDT-driven UART discovery sanitizer tests
@@ -100,7 +111,7 @@ jobs:
             -Wcast-qual -Wundef -Wvla -Werror \
             -fsanitize=address,undefined -fno-sanitize-recover=undefined \
             -fno-omit-frame-pointer -Ikernel \
-            kernel/acpi.c kernel/fdt.c kernel/platform.c tests/platform_tests.c \
+            kernel/acpi.c kernel/fdt.c kernel/mmio.c kernel/platform.c tests/platform_tests.c \
             -o /tmp/astraos-platform-tests
           UBSAN_OPTIONS=print_stacktrace=1 /tmp/astraos-platform-tests
 

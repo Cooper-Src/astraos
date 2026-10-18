@@ -1,5 +1,7 @@
 #include "platform.h"
 
+#include "mmio.h"
+
 #include "acpi.h"
 #include "fdt.h"
 
@@ -368,7 +370,10 @@ bool astra_platform_find_pl011_uart_from_fdt(
         register_size < (uint64_t)PLATFORM_PL011_REGISTER_BYTES ||
         base > UINT64_MAX - register_size ||
         base > (uint64_t)UINTPTR_MAX -
-            (uint64_t)(PLATFORM_PL011_REGISTER_BYTES - 1u)) {
+            (uint64_t)(PLATFORM_PL011_REGISTER_BYTES - 1u) ||
+        !astra_mmio_range_is_valid(
+            boot_info, base, (uint64_t)PLATFORM_PL011_REGISTER_BYTES
+        )) {
         return false;
     }
 

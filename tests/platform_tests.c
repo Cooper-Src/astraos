@@ -18,6 +18,8 @@ static const char g_fixture_hex[] =
     "23616464726573732d63656c6c73002373697a652d63656c6c73006d6f64656c00636f6d70617469"
     "626c65007374646f75742d706174680073657269616c300072656700";
 static uint8_t g_fixture[TEST_FDT_BYTE_COUNT] = {0};
+enum { PLATFORM_TEST_DESCRIPTOR_SIZE = 48u };
+static uint8_t g_memory_map[PLATFORM_TEST_DESCRIPTOR_SIZE] = {0};
 static int g_failures = 0;
 
 #define CHECK(expression) \
@@ -83,10 +85,35 @@ static size_t find_bytes(
     return SIZE_MAX;
 }
 
+static void write_map_u32_le(uint8_t *bytes, uint32_t value) {
+    bytes[0] = (uint8_t)(value & UINT32_C(0xff));
+    bytes[1] = (uint8_t)((value >> 8u) & UINT32_C(0xff));
+    bytes[2] = (uint8_t)((value >> 16u) & UINT32_C(0xff));
+    bytes[3] = (uint8_t)((value >> 24u) & UINT32_C(0xff));
+}
+
+static void write_map_u64_le(uint8_t *bytes, uint64_t value) {
+    for (size_t i = 0u; i < 8u; i++) {
+        bytes[i] = (uint8_t)(value & UINT64_C(0xff));
+        value >>= 8u;
+    }
+}
+
 static AstraBootInfo make_boot_info(void) {
     AstraBootInfo info = {0};
+
+    for (size_t i = 0u; i < sizeof g_memory_map; i++) {
+        g_memory_map[i] = 0u;
+    }
+    write_map_u32_le(&g_memory_map[0], 11u);
+    write_map_u64_le(&g_memory_map[8], UINT64_C(0x09000000));
+    write_map_u64_le(&g_memory_map[24], 1u);
+
     info.magic = ASTRA_BOOT_INFO_MAGIC;
     info.version = ASTRA_BOOT_INFO_VERSION;
+    info.memory_map = g_memory_map;
+    info.memory_map_size = sizeof g_memory_map;
+    info.memory_descriptor_size = PLATFORM_TEST_DESCRIPTOR_SIZE;
     info.device_tree_base = (uint64_t)(uintptr_t)g_fixture;
     info.device_tree_size = (uint64_t)sizeof g_fixture;
     return info;
@@ -124,6 +151,15 @@ static void test_rejects_invalid_arguments_and_malformed_fdt(void) {
     g_fixture[0] = saved_magic;
 }
 
+static void test_rejects_uart_outside_mmio_descriptor(void) {
+    AstraBootInfo info = make_boot_info();
+    uint64_t base = UINT64_C(0xdeadbeef);
+
+    write_map_u32_le(&g_memory_map[0], 7u);
+    CHECK(!astra_platform_find_pl011_uart(&info, &base));
+    CHECK(base == UINT64_C(0xdeadbeef));
+}
+
 static void test_rejects_non_pl011_serial_and_preserves_output(void) {
     static const uint8_t compatible[] = "arm,pl011";
     AstraBootInfo info = make_boot_info();
@@ -151,6 +187,7 @@ int main(void) {
     }
     test_resolves_stdout_alias_and_pl011_register_range();
     test_rejects_invalid_arguments_and_malformed_fdt();
+    test_rejects_uart_outside_mmio_descriptor();
     test_rejects_non_pl011_serial_and_preserves_output();
 
     if (g_failures != 0) {

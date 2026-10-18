@@ -6,6 +6,7 @@
 
 enum {
     TEST_DESCRIPTOR_SIZE = 48u,
+    TEST_DESCRIPTOR_COUNT = 2u,
     TEST_REGION_SIZE = 4096u,
     TEST_RSDP_OFFSET = 0x80u,
     TEST_XSDT_OFFSET = 0x100u,
@@ -15,7 +16,7 @@ enum {
 };
 
 static _Alignas(TEST_REGION_SIZE) uint8_t g_acpi_region[TEST_REGION_SIZE];
-static uint8_t g_memory_map[TEST_DESCRIPTOR_SIZE];
+static uint8_t g_memory_map[TEST_DESCRIPTOR_SIZE * TEST_DESCRIPTOR_COUNT];
 static int g_failures = 0;
 
 #define CHECK(expression) \
@@ -104,10 +105,13 @@ static void make_fixture(AstraBootInfo *boot_info_out) {
     write_u64_le(&spcr[44], UINT64_C(0x09000000));
     set_checksum(spcr, TEST_SPCR_SIZE, 9u);
 
-    /* A single ACPI-reclaim descriptor makes only this page table-readable. */
+    /* ACPI tables are reclaimable; UART registers must be MMIO. */
     write_u32_le(&g_memory_map[0], 9u);
     write_u64_le(&g_memory_map[8], region_base);
     write_u64_le(&g_memory_map[24], 1u);
+    write_u32_le(&g_memory_map[TEST_DESCRIPTOR_SIZE], 11u);
+    write_u64_le(&g_memory_map[TEST_DESCRIPTOR_SIZE + 8u], UINT64_C(0x09000000));
+    write_u64_le(&g_memory_map[TEST_DESCRIPTOR_SIZE + 24u], 1u);
 
     *boot_info_out = (AstraBootInfo){0};
     boot_info_out->magic = ASTRA_BOOT_INFO_MAGIC;
@@ -166,6 +170,28 @@ static void test_unsupported_uart_and_outside_pointer_are_rejected(void) {
     CHECK(spcr.base_address == UINT64_C(0xdeadbeef));
 }
 
+static void test_non_mmio_descriptor_is_rejected(void) {
+    AstraBootInfo boot_info = {0};
+    AstraAcpiSpcr spcr = {.base_address = UINT64_C(0xdeadbeef)};
+
+    make_fixture(&boot_info);
+    write_u32_le(&g_memory_map[TEST_DESCRIPTOR_SIZE], 7u);
+    CHECK(!astra_acpi_find_pl011_uart(&boot_info, &spcr));
+    CHECK(spcr.base_address == UINT64_C(0xdeadbeef));
+}
+
+static void test_register_range_must_fit_in_mmio_descriptor(void) {
+    AstraBootInfo boot_info = {0};
+    AstraAcpiSpcr spcr = {.base_address = UINT64_C(0xdeadbeef)};
+    uint8_t *table = &g_acpi_region[TEST_SPCR_OFFSET];
+
+    make_fixture(&boot_info);
+    write_u64_le(&table[44], UINT64_C(0x09000fc0));
+    set_checksum(table, TEST_SPCR_SIZE, 9u);
+    CHECK(!astra_acpi_find_pl011_uart(&boot_info, &spcr));
+    CHECK(spcr.base_address == UINT64_C(0xdeadbeef));
+}
+
 static void test_table_length_is_bounded(void) {
     AstraBootInfo boot_info = {0};
     AstraAcpiSpcr spcr = {.base_address = UINT64_C(0xdeadbeef)};
@@ -182,6 +208,8 @@ int main(void) {
     test_invalid_rsdp_checksum_is_rejected();
     test_invalid_spcr_checksum_is_rejected();
     test_unsupported_uart_and_outside_pointer_are_rejected();
+    test_non_mmio_descriptor_is_rejected();
+    test_register_range_must_fit_in_mmio_descriptor();
     test_table_length_is_bounded();
 
     if (g_failures != 0) {
