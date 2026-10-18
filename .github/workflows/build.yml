@@ -33,6 +33,17 @@ jobs:
             tests/uefi_shell_tests.c -o /tmp/astraos-shell-tests
           UBSAN_OPTIONS=print_stacktrace=1 /tmp/astraos-shell-tests
 
+      - name: Run kernel VFS sanitizer tests
+        run: |
+          clang -std=c17 -g -O0 \
+            -Wall -Wextra -Wpedantic -Wshadow -Wconversion -Wformat=2 \
+            -Wstrict-prototypes -Wmissing-prototypes -Wwrite-strings \
+            -Wcast-qual -Wundef -Wvla -Werror \
+            -fsanitize=address,undefined -fno-sanitize-recover=undefined \
+            -fno-omit-frame-pointer -Ikernel \
+            kernel/vfs.c tests/vfs_tests.c -o /tmp/astraos-vfs-tests
+          UBSAN_OPTIONS=print_stacktrace=1 /tmp/astraos-vfs-tests
+
       - name: Build ARM64 UEFI application and ISO
         run: bash ./scripts/build.sh
 
