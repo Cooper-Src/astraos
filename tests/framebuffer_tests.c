@@ -101,6 +101,11 @@ static void test_invalid_metadata_disables_framebuffer(void) {
     CHECK(!astra_framebuffer_is_active());
 
     info = make_boot_info();
+    info.framebuffer_base = UINT64_MAX - 4u;
+    astra_framebuffer_init(&info);
+    CHECK(!astra_framebuffer_is_active());
+
+    info = make_boot_info();
     info.framebuffer_pixel_format = 3u;
     astra_framebuffer_init(&info);
     CHECK(!astra_framebuffer_is_active());
@@ -124,6 +129,15 @@ static void test_bitmask_format_validation(void) {
     CHECK(astra_framebuffer_is_active());
 
     info.framebuffer_green_mask = UINT32_C(0x00ff0000);
+    astra_framebuffer_init(&info);
+    CHECK(!astra_framebuffer_is_active());
+
+    info = make_boot_info();
+    info.framebuffer_pixel_format = 2u;
+    info.framebuffer_red_mask = UINT32_C(0x00f50000);
+    info.framebuffer_green_mask = UINT32_C(0x0000ff00);
+    info.framebuffer_blue_mask = UINT32_C(0x000000ff);
+    info.framebuffer_reserved_mask = UINT32_C(0xff000000);
     astra_framebuffer_init(&info);
     CHECK(!astra_framebuffer_is_active());
 }
