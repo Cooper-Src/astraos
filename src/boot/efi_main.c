@@ -3,6 +3,7 @@
 #include <stdint.h>
 
 #include "../../kernel/boot_info.h"
+#include "../../kernel/fdt.h"
 
 typedef unsigned char EFI_UINT8;
 typedef unsigned short EFI_UINT16;
@@ -48,6 +49,11 @@ typedef struct EFI_GUID {
     EFI_UINT16 Data3;
     EFI_UINT8 Data4[8];
 } EFI_GUID;
+
+typedef struct EFI_CONFIGURATION_TABLE {
+    EFI_GUID VendorGuid;
+    void *VendorTable;
+} EFI_CONFIGURATION_TABLE;
 
 typedef struct EFI_TABLE_HEADER {
     EFI_UINT64 Signature;
@@ -144,7 +150,7 @@ typedef struct EFI_SYSTEM_TABLE {
     void *RuntimeServices;
     EFI_BOOT_SERVICES *BootServices;
     EFI_UINTN NumberOfTableEntries;
-    void *ConfigurationTable;
+    EFI_CONFIGURATION_TABLE *ConfigurationTable;
 } EFI_SYSTEM_TABLE;
 
 
@@ -229,6 +235,10 @@ static EFI_GUID g_simple_file_system_guid = {
 static EFI_GUID g_graphics_output_guid = {
     0x9042a9deu, 0x23dcu, 0x4a38u,
     {0x96u, 0xfbu, 0x7au, 0xdeu, 0xd0u, 0x80u, 0x51u, 0x6au}
+};
+static const EFI_GUID g_dtb_table_guid = {
+    0xb1b621d5u, 0xf19cu, 0x41a5u,
+    {0x83u, 0x0bu, 0xd9u, 0x15u, 0x2cu, 0x69u, 0xaau, 0xe0u}
 };
 static CHAR16 g_kernel_file_name[] = L"kernel.bin";
 static EFI_UINT8 g_kernel_staging[KERNEL_STAGING_CAP];
@@ -389,6 +399,70 @@ cleanup:
         *kernel_size_out = total;
     }
     return status;
+}
+
+static bool guid_equal(const EFI_GUID *left, const EFI_GUID *right) {
+    if (left == NULL || right == NULL ||
+        left->Data1 != right->Data1 ||
+        left->Data2 != right->Data2 ||
+        left->Data3 != right->Data3) {
+        return false;
+    }
+    for (size_t i = 0; i < sizeof left->Data4; i++) {
+        if (left->Data4[i] != right->Data4[i]) {
+            return false;
+        }
+    }
+    return true;
+}
+
+/* The firmware owns the DTB memory; the kernel borrows it after ExitBootServices. */
+static void capture_device_tree(
+    EFI_SYSTEM_TABLE *system_table,
+    AstraBootInfo *boot_info
+) {
+    enum { MAX_CONFIGURATION_TABLES = 4096u };
+    EFI_CONFIGURATION_TABLE *tables = NULL;
+    AstraFdtView view = {0};
+    AstraFdtResult result = ASTRA_FDT_OK;
+
+    if (boot_info == NULL) {
+        return;
+    }
+    boot_info->device_tree_base = 0;
+    boot_info->device_tree_size = 0;
+    if (system_table == NULL || system_table->ConfigurationTable == NULL ||
+        system_table->NumberOfTableEntries == 0 ||
+        system_table->NumberOfTableEntries > (EFI_UINTN)MAX_CONFIGURATION_TABLES) {
+        return;
+    }
+
+    tables = system_table->ConfigurationTable;
+    for (EFI_UINTN i = 0; i < system_table->NumberOfTableEntries; i++) {
+        if (!guid_equal(&tables[i].VendorGuid, &g_dtb_table_guid)) {
+            continue;
+        }
+        if (tables[i].VendorTable == NULL) {
+            loader_out(L"Warning: firmware device-tree pointer is null.\r\n");
+            return;
+        }
+
+        result = astra_fdt_open(
+            tables[i].VendorTable,
+            (size_t)ASTRA_FDT_MAX_SIZE,
+            &view
+        );
+        if (result != ASTRA_FDT_OK) {
+            loader_out(L"Warning: firmware device tree failed validation.\r\n");
+            return;
+        }
+
+        boot_info->device_tree_base = (EFI_UINT64)(uintptr_t)view.data;
+        boot_info->device_tree_size = (EFI_UINT64)view.total_size;
+        loader_out(L"Validated firmware device tree found.\r\n");
+        return;
+    }
+    loader_out(L"No firmware device tree table was provided.\r\n");
 }
 
 static void clear_framebuffer_info(AstraBootInfo *boot_info) {
@@ -573,6 +647,7 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *system_table) {
     g_boot_info.kernel_allocation_size = KERNEL_ALLOCATION_SIZE;
     clear_framebuffer_info(&g_boot_info);
     capture_framebuffer(boot_services, &g_boot_info);
+    capture_device_tree(system_table, &g_boot_info);
 
     if (g_boot_info.framebuffer_base != 0) {
         loader_out(L"UEFI GOP framebuffer discovered.\r\n");
