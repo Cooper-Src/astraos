@@ -97,6 +97,7 @@ static void test_paths_removal_and_modes(void) {
     CHECK(vfs_create(long_path, false) == VFS_ERR_PATH_TOO_LONG);
     CHECK(vfs_chmod("/README.txt", 010000u) == VFS_ERR_INVALID_MODE);
     CHECK(vfs_chmod("/README.txt", 0000u) == VFS_OK);
+    CHECK(vfs_switch_user(VFS_UID_ASTRA) == VFS_OK);
     CHECK(vfs_read("/README.txt", cwd, sizeof cwd, &count) == VFS_ERR_PERMISSION_DENIED);
 }
 
