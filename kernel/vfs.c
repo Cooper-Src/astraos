@@ -534,6 +534,9 @@ AstraVfsResult astra_vfs_create(
             last_slash = i;
         }
     }
+    if (path[path_len - 1u] == '/') {
+        return ASTRA_VFS_INVALID_NAME;
+    }
 
     if (last_slash == (size_t)-1) {
         parent_id = fs->cwd;
@@ -653,6 +656,9 @@ AstraVfsResult astra_vfs_remove(AstraVfs *fs, const char *path, size_t path_len)
     if ((parent_node->mode & 01000u) != 0 &&
         fs->uid != (uint32_t)ASTRA_VFS_ROOT_UID &&
         fs->uid != parent_node->owner_uid && fs->uid != node->owner_uid) {
+        return ASTRA_VFS_PERMISSION_DENIED;
+    }
+    if (node->is_directory && id == fs->cwd) {
         return ASTRA_VFS_PERMISSION_DENIED;
     }
     if (node->is_directory) {
