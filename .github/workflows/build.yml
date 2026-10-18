@@ -321,5 +321,6 @@ jobs:
               --prerelease
           gh release upload rolling \
             build/astraos-aarch64.iso build/astraos-aarch64-esp.img \
+            build/astraos-qemu-virt.iso build/astraos-qemu-virt-esp.img \
             build/kernel.elf build/kernel.bin build/SHA256SUMS \
             --repo "$GITHUB_REPOSITORY" --clobber
