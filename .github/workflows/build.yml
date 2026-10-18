@@ -36,8 +36,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          CODE="$(find /usr/share -type f -name 'AAVMF_CODE.fd' -print -quit)"
-          VARS_TEMPLATE="$(find /usr/share -type f -name 'AAVMF_VARS.fd' -print -quit)"
+          CODE="$(find /usr/share -name 'AAVMF_CODE.fd' -print -quit)"
+          VARS_TEMPLATE="$(find /usr/share -name 'AAVMF_VARS.fd' -print -quit)"
           if [[ -z "$CODE" || -z "$VARS_TEMPLATE" ]]; then
             echo "Could not find AArch64 UEFI firmware package files." >&2
             exit 1
