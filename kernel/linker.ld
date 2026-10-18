@@ -30,7 +30,7 @@ SECTIONS
     }
 
     __kernel_end = .;
-    ASSERT(__kernel_end <= 0x40400000, "AstraOS kernel exceeds reserved 2 MiB");
+    ASSERT(__kernel_end <= 0x40400000, "AstraOS kernel exceeds reserved 2 MiB")
     /DISCARD/ :
     {
         *(.comment)
