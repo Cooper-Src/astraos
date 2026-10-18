@@ -122,7 +122,6 @@ static void out(const CHAR16 *s) {
         }
     }
 }
-#endif /* ASTRAOS_TEST */
 static void out_ch(CHAR16 c) { CHAR16 s[2]; s[0]=c;s[1]=0;out(s); }
 static void out_u32(UINT32 v) {
     CHAR16 b[16]; UINTN n=0; if(v==0){out_ch('0');return;}
