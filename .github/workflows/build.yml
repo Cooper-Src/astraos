@@ -115,9 +115,12 @@ jobs:
           xorriso -indev build/astraos-aarch64.iso -report_el_torito as_mkisofs
           test -s build/astraos-aarch64.iso
           test -s build/astraos-aarch64-esp.img
+          test -s build/astraos-qemu-virt.iso
+          test -s build/astraos-qemu-virt-esp.img
           test -s build/kernel.bin
+          (cd build && sha256sum -c SHA256SUMS)
 
-      - name: Smoke-test UEFI boot and kernel shell in QEMU
+      - name: Smoke-test the QEMU virt image and kernel shell
         shell: bash
         run: |
           set -euo pipefail
@@ -147,7 +150,7 @@ jobs:
             -machine virt -cpu cortex-a72 -m 1024 \
             -drive if=pflash,format=raw,unit=0,readonly=on,file="$CODE" \
             -drive if=pflash,format=raw,unit=1,file=build/uefi-vars.fd \
-            -cdrom build/astraos-aarch64.iso -boot order=d \
+            -cdrom build/astraos-qemu-virt.iso -boot order=d \
             -display none -serial stdio -monitor none \
             > build/qemu-boot.log 2>&1
           QEMU_STATUS=$?
@@ -268,7 +271,7 @@ jobs:
             -device ramfb \
             -drive if=pflash,format=raw,unit=0,readonly=on,file="$CODE" \
             -drive if=pflash,format=raw,unit=1,file=build/uefi-gop-vars.fd \
-            -cdrom build/astraos-aarch64.iso -boot order=d \
+            -cdrom build/astraos-qemu-virt.iso -boot order=d \
             -display none -serial stdio -monitor none \
             > build/qemu-gop.log 2>&1
           QEMU_STATUS=$?
@@ -298,6 +301,8 @@ jobs:
           path: |
             build/astraos-aarch64.iso
             build/astraos-aarch64-esp.img
+            build/astraos-qemu-virt.iso
+            build/astraos-qemu-virt-esp.img
             build/SHA256SUMS
             build/kernel.elf
             build/kernel.bin
