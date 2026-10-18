@@ -92,6 +92,21 @@ jobs:
             kernel/fdt.c tests/fdt_tests.c -o /tmp/astraos-fdt-tests
           UBSAN_OPTIONS=print_stacktrace=1 /tmp/astraos-fdt-tests
 
+      - name: Fuzz FDT parser with ASan and UBSan
+        run: |
+          clang -std=c17 -g -O1 \
+            -Wall -Wextra -Wpedantic -Wshadow -Wconversion -Wformat=2 \
+            -Wstrict-prototypes -Wmissing-prototypes -Wwrite-strings \
+            -Wcast-qual -Wundef -Wvla -Werror \
+            -fsanitize=fuzzer,address,undefined -fno-sanitize-recover=undefined \
+            -fno-omit-frame-pointer -Ikernel \
+            kernel/fdt.c tests/fuzz_fdt.c -o /tmp/astraos-fdt-fuzz
+          python3 tests/make_fdt_fixture.py build/fdt-fuzz-seed.dtb
+          mkdir -p build/fdt-fuzz-corpus
+          cp build/fdt-fuzz-seed.dtb build/fdt-fuzz-corpus/seed.dtb
+          UBSAN_OPTIONS=print_stacktrace=1 ASAN_OPTIONS=detect_leaks=1 \
+            /tmp/astraos-fdt-fuzz -runs=2500 -max_len=4096 build/fdt-fuzz-corpus
+
       - name: Run ACPI SPCR parser sanitizer tests
         run: |
           clang -std=c17 -g -O0 \
