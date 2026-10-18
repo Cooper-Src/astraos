@@ -51,12 +51,6 @@ static void test_framebuffer_init_and_glyph_render(void) {
     CHECK(g_pixels[0] == UINT32_C(0xff080e18));
 
     astra_framebuffer_put_byte((uint8_t)'A');
-    (void)fprintf(stderr, "framebuffer row 1: %08x %08x %08x %08x %08x\n",
-        (unsigned int)g_pixels[TEST_FB_WIDTH],
-        (unsigned int)g_pixels[TEST_FB_WIDTH + 1u],
-        (unsigned int)g_pixels[TEST_FB_WIDTH + 2u],
-        (unsigned int)g_pixels[TEST_FB_WIDTH + 3u],
-        (unsigned int)g_pixels[TEST_FB_WIDTH + 4u]);
     CHECK(g_pixels[(size_t)TEST_FB_WIDTH + 2u] == UINT32_C(0xfff0f4f8));
     CHECK(g_pixels[(size_t)TEST_FB_WIDTH + 1u] == UINT32_C(0xff080e18));
 
