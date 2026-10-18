@@ -20,7 +20,6 @@ enum {
     ACPI_RSDP_RSDT_OFFSET = 16u,
     ACPI_RSDP_LENGTH_OFFSET = 20u,
     ACPI_RSDP_XSDT_OFFSET = 24u,
-    ACPI_RSDP_EXT_CHECKSUM_OFFSET = 32u,
     ACPI_SDT_LENGTH_OFFSET = 4u,
     ACPI_SDT_CHECKSUM_OFFSET = 9u,
     ACPI_SPCR_INTERFACE_OFFSET = 36u,
@@ -283,9 +282,7 @@ bool astra_acpi_find_pl011_uart(
         !acpi_region_for_address(
             boot_info, boot_info->acpi_rsdp_base,
             (size_t)ACPI_RSDP_V1_SIZE, &rsdp, &rsdp_available
-        ) ||
-        !acpi_bytes_equal(rsdp, "RSD ")) {
-        /* The RSDP has an eight-byte signature, handled below separately. */
+        )) {
         return false;
     }
 
@@ -311,7 +308,12 @@ bool astra_acpi_find_pl011_uart(
             return false;
         }
         root_address = acpi_read_u64_le(&rsdp[ACPI_RSDP_XSDT_OFFSET]);
-        is_xsdt = true;
+        is_xsdt = root_address != 0u;
+        if (root_address == 0u) {
+            root_address = (uint64_t)acpi_read_u32_le(
+                &rsdp[ACPI_RSDP_RSDT_OFFSET]
+            );
+        }
     } else {
         root_address = (uint64_t)acpi_read_u32_le(&rsdp[ACPI_RSDP_RSDT_OFFSET]);
     }
