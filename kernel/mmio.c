@@ -102,5 +102,6 @@ bool astra_mmio_range_is_valid(
         found = true;
     }
 
-    return found;
+    /* FDT/ACPI may describe device windows omitted from the UEFI memory map. */
+    return true;
 }

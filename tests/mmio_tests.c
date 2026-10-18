@@ -84,6 +84,14 @@ static void test_valid_and_boundary_ranges(void) {
     CHECK(!astra_mmio_range_is_valid(&info, UINT64_C(0x09000fc0), 72u));
 }
 
+static void test_unlisted_device_window_is_allowed_without_conflicts(void) {
+    AstraBootInfo info = make_boot_info();
+
+    /* The device tree names this UART, but the UEFI map omits its address. */
+    set_descriptor(1u, 7u, UINT64_C(0x20000000), 1u);
+    CHECK(astra_mmio_range_is_valid(&info, UINT64_C(0x09000000), 72u));
+}
+
 static void test_ram_and_malformed_ranges_are_rejected(void) {
     AstraBootInfo info = make_boot_info();
 
@@ -111,6 +119,7 @@ static void test_overlapping_non_mmio_descriptor_is_rejected(void) {
 
 int main(void) {
     test_valid_and_boundary_ranges();
+    test_unlisted_device_window_is_allowed_without_conflicts();
     test_ram_and_malformed_ranges_are_rejected();
     test_overlapping_non_mmio_descriptor_is_rejected();
 

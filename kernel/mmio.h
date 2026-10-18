@@ -7,9 +7,10 @@
 #include "boot_info.h"
 
 /*
- * Checks that the complete byte span is contained in one EFI_MEMORY_MAPPED_IO
- * or EfiReservedMemoryType descriptor and does not overlap any descriptor of
- * another type. Callers must independently identify the device through FDT/ACPI.
+ * Rejects overlap with RAM or any conflicting memory-map descriptor. If one
+ * descriptor overlaps the requested span, it must be EFI_MEMORY_MAPPED_IO or
+ * EfiReservedMemoryType and contain the complete span. A missing descriptor is
+ * permitted only because callers first validate a specific FDT/ACPI device.
  * This examines metadata only; it does not access the requested MMIO address.
  */
 bool astra_mmio_range_is_valid(

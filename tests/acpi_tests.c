@@ -180,6 +180,16 @@ static void test_reserved_uart_descriptor_is_accepted(void) {
     CHECK(spcr.base_address == UINT64_C(0x09000000));
 }
 
+static void test_unlisted_uart_window_is_accepted_without_conflicts(void) {
+    AstraBootInfo boot_info = {0};
+    AstraAcpiSpcr spcr = {.base_address = UINT64_C(0xdeadbeef)};
+
+    make_fixture(&boot_info);
+    write_u64_le(&g_memory_map[TEST_DESCRIPTOR_SIZE + 8u], UINT64_C(0x20000000));
+    CHECK(astra_acpi_find_pl011_uart(&boot_info, &spcr));
+    CHECK(spcr.base_address == UINT64_C(0x09000000));
+}
+
 static void test_non_mmio_descriptor_is_rejected(void) {
     AstraBootInfo boot_info = {0};
     AstraAcpiSpcr spcr = {.base_address = UINT64_C(0xdeadbeef)};
@@ -219,6 +229,7 @@ int main(void) {
     test_invalid_spcr_checksum_is_rejected();
     test_unsupported_uart_and_outside_pointer_are_rejected();
     test_reserved_uart_descriptor_is_accepted();
+    test_unlisted_uart_window_is_accepted_without_conflicts();
     test_non_mmio_descriptor_is_rejected();
     test_register_range_must_fit_in_mmio_descriptor();
     test_table_length_is_bounded();

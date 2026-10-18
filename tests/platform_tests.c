@@ -160,6 +160,16 @@ static void test_rejects_uart_outside_mmio_descriptor(void) {
     CHECK(base == UINT64_C(0xdeadbeef));
 }
 
+static void test_accepts_fdt_uart_when_firmware_omits_mmio_descriptor(void) {
+    AstraBootInfo info = make_boot_info();
+    uint64_t base = UINT64_C(0xdeadbeef);
+
+    write_map_u32_le(&g_memory_map[0], 11u);
+    write_map_u64_le(&g_memory_map[8], UINT64_C(0x20000000));
+    CHECK(astra_platform_find_pl011_uart(&info, &base));
+    CHECK(base == UINT64_C(0x09000000));
+}
+
 static void test_rejects_non_pl011_serial_and_preserves_output(void) {
     static const uint8_t compatible[] = "arm,pl011";
     AstraBootInfo info = make_boot_info();
@@ -188,6 +198,7 @@ int main(void) {
     test_resolves_stdout_alias_and_pl011_register_range();
     test_rejects_invalid_arguments_and_malformed_fdt();
     test_rejects_uart_outside_mmio_descriptor();
+    test_accepts_fdt_uart_when_firmware_omits_mmio_descriptor();
     test_rejects_non_pl011_serial_and_preserves_output();
 
     if (g_failures != 0) {
