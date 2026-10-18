@@ -77,11 +77,15 @@ jobs:
           set -e
           cat build/qemu-boot.log
           # The interactive live shell intentionally keeps running. Timeout is expected.
-          if ! grep -q "AstraOS alpha 0.1" build/qemu-boot.log; then
-            echo "AstraOS startup marker not found in QEMU console log (exit $QEMU_STATUS)." >&2
+          if ! grep -q "AstraOS kernel 0.2" build/qemu-boot.log; then
+            echo "AstraOS kernel startup marker not found in QEMU console log (exit $QEMU_STATUS)." >&2
             exit 1
           fi
-          echo "AstraOS startup marker verified in QEMU output."
+          if ! grep -q "root@astra:/#" build/qemu-boot.log; then
+            echo "Kernel did not reach the interactive root prompt." >&2
+            exit 1
+          fi
+          echo "AstraOS kernel startup marker and interactive prompt verified."
 
       - name: Upload ISO and checksums
         uses: actions/upload-artifact@v4
@@ -91,6 +95,8 @@ jobs:
             build/astraos-aarch64.iso
             build/astraos-aarch64-esp.img
             build/SHA256SUMS
+            build/kernel.elf
+            build/kernel.bin
           if-no-files-found: error
           retention-days: 30
 
@@ -105,5 +111,6 @@ jobs:
               --notes "Automatically built development image. Not a stable release." \
               --prerelease
           gh release upload rolling \
-            build/astraos-aarch64.iso build/astraos-aarch64-esp.img build/SHA256SUMS \
+            build/astraos-aarch64.iso build/astraos-aarch64-esp.img \
+            build/kernel.elf build/kernel.bin build/SHA256SUMS \
             --repo "$GITHUB_REPOSITORY" --clobber
