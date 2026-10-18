@@ -21,7 +21,7 @@ AstraOS is an experimental from-scratch ARM64 operating-system project. The curr
 On Debian/Ubuntu, install the dependencies:
 
     sudo apt update
-    sudo apt install clang lld xorriso dosfstools mtools qemu-system-arm qemu-efi-aarch64 file
+    sudo apt install clang lld xorriso dosfstools mtools qemu-system-arm qemu-efi-aarch64 file python3
 
 Build from the repository root:
 
@@ -30,13 +30,15 @@ Build from the repository root:
 The build uses strict compiler warnings and rejects undefined kernel symbols. CI also requires a QEMU boot with the kernel loaded away from its link address. Outputs are:
 
 - `build/astraos-aarch64.iso` — UEFI-bootable optical-disc image.
-- `build/astraos-aarch64-esp.img` — FAT EFI system partition image.
+- `build/astraos-aarch64-esp.img` — generic FAT EFI system partition image.
+- `build/astraos-qemu-virt.iso` — interactive QEMU `virt` image with a QEMU-only test device tree in its EFI partition.
+- `build/astraos-qemu-virt-esp.img` — matching QEMU test ESP image.
 - `build/kernel.elf` and `build/kernel.bin` — kernel debug and flat images.
-- `build/SHA256SUMS` — SHA-256 checksums.
+- `build/SHA256SUMS` — portable SHA-256 checksums. Verify them with `cd build && sha256sum -c SHA256SUMS`.
 
 ## Boot and interact in QEMU
 
-Install QEMU ARM64 and an AArch64 UEFI firmware package (for example, `qemu-efi-aarch64`). With a graphical display, run:
+Install QEMU ARM64 and an AArch64 UEFI firmware package (for example, `qemu-efi-aarch64`). Use `astraos-qemu-virt.iso` for interactive QEMU testing; it includes a test-only DTB that identifies QEMU's PL011 UART. With a graphical display, run:
 
     CODE="$(find /usr/share -name AAVMF_CODE.fd -print -quit)"
     VARS_TEMPLATE="$(find /usr/share -name AAVMF_VARS.fd -print -quit)"
@@ -46,7 +48,7 @@ Install QEMU ARM64 and an AArch64 UEFI firmware package (for example, `qemu-efi-
       -device ramfb \
       -drive if=pflash,format=raw,unit=0,readonly=on,file="$CODE" \
       -drive if=pflash,format=raw,unit=1,file=/tmp/astraos-vars.fd \
-      -cdrom build/astraos-aarch64.iso -boot order=d \
+      -cdrom build/astraos-qemu-virt.iso -boot order=d \
       -display default -serial stdio -monitor none
 
 The kernel draws to the framebuffer when UEFI supplies a supported GOP mode and also mirrors text to serial. **Type commands in the terminal running QEMU**, because input still comes from the emulated PL011 UART; a framebuffer window is output only.
