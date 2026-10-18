@@ -423,7 +423,7 @@ static void capture_device_tree(
 ) {
     enum { MAX_CONFIGURATION_TABLES = 4096u };
     EFI_CONFIGURATION_TABLE *tables = NULL;
-    AstraFdtView view = {0};
+    AstraFdtView view;
     AstraFdtResult result = ASTRA_FDT_OK;
 
     if (boot_info == NULL) {
