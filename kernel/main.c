@@ -411,7 +411,7 @@ static void command_dispatch(const char *command, size_t command_len,
         astra_uart_write(path, written);
         astra_uart_puts("\n");
     } else if (token_equals(command, command_len, "ls")) {
-        command_ls(args_len == 0 ? "/" : args, args_len == 0 ? 1u : args_len);
+        command_ls(args_len == 0 ? "." : args, args_len == 0 ? 1u : args_len);
     } else if (token_equals(command, command_len, "cd")) {
         if (args_len == 0) {
             astra_uart_puts("usage: cd PATH\n");
@@ -582,26 +582,38 @@ void astra_kernel_main(const AstraBootInfo *boot_info) {
 
         line_len = 0;
         line[0] = '\0';
-        for (;;) {
-            uint8_t input = astra_uart_get_byte();
-            if (input == (uint8_t)'\r' || input == (uint8_t)'\n') {
-                astra_uart_puts("\n");
-                break;
-            }
-            if (input == 0x08u || input == 0x7fu) {
-                if (line_len > 0) {
-                    line_len--;
-                    line[line_len] = '\0';
-                    astra_uart_puts("\b \b");
+        {
+            bool line_too_long = false;
+
+            for (;;) {
+                uint8_t input = astra_uart_get_byte();
+                if (input == (uint8_t)'\r' || input == (uint8_t)'\n') {
+                    astra_uart_puts("\n");
+                    break;
                 }
-                continue;
+                if (input == 0x08u || input == 0x7fu) {
+                    if (line_len > 0) {
+                        line_len--;
+                        line[line_len] = '\0';
+                        astra_uart_puts("\b \b");
+                    }
+                    continue;
+                }
+                if (input >= 0x20u && input < 0x7fu) {
+                    if (line_len + 1u < sizeof line) {
+                        line[line_len] = (char)input;
+                        line_len++;
+                        line[line_len] = '\0';
+                        astra_uart_put_byte(input);
+                    } else {
+                        line_too_long = true;
+                    }
+                }
             }
-            if (input >= 0x20u && input < 0x7fu &&
-                line_len + 1u < sizeof line) {
-                line[line_len] = (char)input;
-                line_len++;
-                line[line_len] = '\0';
-                astra_uart_put_byte(input);
+
+            if (line_too_long) {
+                astra_uart_puts("error: command too long; discarded\n");
+                continue;
             }
         }
 
