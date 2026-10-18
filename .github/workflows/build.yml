@@ -142,6 +142,36 @@ jobs:
           fi
           echo "AstraOS boot, root prompt, identity, and create/write/read behavior verified."
 
+      - name: Smoke-test GOP framebuffer handoff in QEMU
+        shell: bash
+        run: |
+          set -euo pipefail
+          CODE="$(find /usr/share -name 'AAVMF_CODE.fd' -print -quit)"
+          VARS_TEMPLATE="$(find /usr/share -name 'AAVMF_VARS.fd' -print -quit)"
+          if [[ -z "$CODE" || -z "$VARS_TEMPLATE" ]]; then
+            echo "Could not find AArch64 UEFI firmware files." >&2
+            exit 1
+          fi
+          cp "$VARS_TEMPLATE" build/uefi-gop-vars.fd
+          set +e
+          timeout 20s qemu-system-aarch64 \
+            -machine virt -cpu cortex-a72 -m 1024 \
+            -device virtio-gpu-pci \
+            -drive if=pflash,format=raw,unit=0,readonly=on,file="$CODE" \
+            -drive if=pflash,format=raw,unit=1,file=build/uefi-gop-vars.fd \
+            -cdrom build/astraos-aarch64.iso -boot order=d \
+            -display none -serial stdio -monitor none \
+            > build/qemu-gop.log 2>&1
+          QEMU_STATUS=$?
+          set -e
+          cat build/qemu-gop.log
+          if ! grep -q "GOP framebuffer console active" build/qemu-gop.log; then
+            echo "AstraOS did not activate the GOP framebuffer under QEMU virtio-gpu." >&2
+            echo "QEMU exit status: $QEMU_STATUS" >&2
+            exit 1
+          fi
+          echo "GOP framebuffer activated and kernel continued booting."
+
       - name: Upload ISO and kernel artifacts
         uses: actions/upload-artifact@v4
         with:
