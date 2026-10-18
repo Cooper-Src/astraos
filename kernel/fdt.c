@@ -287,35 +287,84 @@ AstraFdtResult astra_fdt_open(
     return ASTRA_FDT_OK;
 }
 
-AstraFdtResult astra_fdt_root_property(
+AstraFdtResult astra_fdt_node_property(
     const AstraFdtView *view,
+    const char *node_path,
+    size_t node_path_length,
     const char *name,
     size_t name_length,
     const uint8_t **value_out,
     size_t *value_length_out
 ) {
+    enum { FDT_MAX_PATH_DEPTH = 64u };
     AstraFdtView checked_view;
     AstraFdtResult result = ASTRA_FDT_OK;
-    size_t position = 0;
-    size_t structure_end = 0;
-    size_t depth = 0;
-    bool root_seen = false;
+    size_t segment_offsets[FDT_MAX_PATH_DEPTH];
+    size_t segment_lengths[FDT_MAX_PATH_DEPTH];
+    bool prefix_matches[FDT_MAX_PATH_DEPTH + 1u];
+    size_t segment_count = 0u;
+    size_t path_position = 0u;
+    size_t position = 0u;
+    size_t structure_end = 0u;
+    size_t depth = 0u;
 
-    if (view == NULL || name == NULL || name_length == 0u ||
-        value_out == NULL || value_length_out == NULL) {
+    if (value_out != NULL) {
+        *value_out = NULL;
+    }
+    if (value_length_out != NULL) {
+        *value_length_out = 0u;
+    }
+    if (view == NULL || node_path == NULL || name == NULL ||
+        node_path_length == 0u || name_length == 0u ||
+        value_out == NULL || value_length_out == NULL || node_path[0] != '/') {
         return ASTRA_FDT_INVALID_ARGUMENT;
     }
-    *value_out = NULL;
-    *value_length_out = 0;
+
+    if (node_path_length > 1u) {
+        path_position = 1u;
+        while (path_position < node_path_length) {
+            size_t segment_start = path_position;
+            size_t segment_length = 0u;
+
+            while (path_position < node_path_length &&
+                node_path[path_position] != '/') {
+                if (node_path[path_position] == '\0') {
+                    return ASTRA_FDT_INVALID_ARGUMENT;
+                }
+                path_position++;
+            }
+            segment_length = path_position - segment_start;
+            if (segment_length == 0u || segment_count >= (size_t)FDT_MAX_PATH_DEPTH ||
+                bytes_equal_text((const uint8_t *)&node_path[segment_start],
+                    segment_length, ".", 1u) ||
+                bytes_equal_text((const uint8_t *)&node_path[segment_start],
+                    segment_length, "..", 2u)) {
+                return ASTRA_FDT_INVALID_ARGUMENT;
+            }
+
+            segment_offsets[segment_count] = segment_start;
+            segment_lengths[segment_count] = segment_length;
+            segment_count++;
+
+            if (path_position < node_path_length) {
+                path_position++;
+                if (path_position == node_path_length) {
+                    return ASTRA_FDT_INVALID_ARGUMENT;
+                }
+            }
+        }
+    }
+
     result = astra_fdt_open(view->data, view->total_size, &checked_view);
     if (result != ASTRA_FDT_OK) {
         return result;
     }
 
+    prefix_matches[0] = true;
     position = checked_view.structure_offset;
     structure_end = checked_view.structure_offset + checked_view.structure_size;
     while (position < structure_end) {
-        uint32_t token = 0;
+        uint32_t token = 0u;
 
         if (!range_inside(structure_end, position, (size_t)FDT_TOKEN_SIZE)) {
             return ASTRA_FDT_INVALID_STRUCTURE;
@@ -324,18 +373,32 @@ AstraFdtResult astra_fdt_root_property(
         position += (size_t)FDT_TOKEN_SIZE;
 
         if (token == (uint32_t)FDT_TOKEN_BEGIN_NODE) {
-            if (depth == 0u) {
-                if (root_seen) {
-                    return ASTRA_FDT_INVALID_STRUCTURE;
-                }
-                root_seen = true;
-            }
+            size_t node_name_start = position;
+            size_t node_name_length = 0u;
+
             while (position < structure_end && checked_view.data[position] != 0u) {
                 position++;
             }
-            if (position == structure_end) {
+            if (position >= structure_end) {
                 return ASTRA_FDT_INVALID_STRUCTURE;
             }
+            node_name_length = position - node_name_start;
+
+            if (depth == 0u) {
+                if (node_name_length != 0u) {
+                    return ASTRA_FDT_INVALID_STRUCTURE;
+                }
+                prefix_matches[0] = true;
+            } else if (depth <= segment_count) {
+                prefix_matches[depth] = prefix_matches[depth - 1u] &&
+                    bytes_equal_text(
+                        &checked_view.data[node_name_start],
+                        node_name_length,
+                        &node_path[segment_offsets[depth - 1u]],
+                        segment_lengths[depth - 1u]
+                    );
+            }
+
             position++;
             if (!align4(position, &position) || position > structure_end) {
                 return ASTRA_FDT_INVALID_STRUCTURE;
@@ -346,14 +409,11 @@ AstraFdtResult astra_fdt_root_property(
                 return ASTRA_FDT_INVALID_STRUCTURE;
             }
             depth--;
-            if (root_seen && depth == 0u) {
-                return ASTRA_FDT_PROPERTY_NOT_FOUND;
-            }
         } else if (token == (uint32_t)FDT_TOKEN_PROPERTY) {
-            size_t value_length = 0;
-            size_t name_offset = 0;
-            size_t property_name_length = 0;
-            size_t property_name_start = 0;
+            size_t property_value_length = 0u;
+            size_t property_name_offset = 0u;
+            size_t property_name_length = 0u;
+            size_t property_name_start = 0u;
             const uint8_t *property_name = NULL;
             const uint8_t *property_value = NULL;
 
@@ -361,51 +421,74 @@ AstraFdtResult astra_fdt_root_property(
                 !range_inside(structure_end, position, 8u)) {
                 return ASTRA_FDT_INVALID_STRUCTURE;
             }
-            value_length = (size_t)read_be32(&checked_view.data[position]);
-            name_offset = (size_t)read_be32(&checked_view.data[position + 4u]);
+            property_value_length = (size_t)read_be32(&checked_view.data[position]);
+            property_name_offset = (size_t)read_be32(&checked_view.data[position + 4u]);
             position += 8u;
-            if (!range_inside(structure_end, position, value_length)) {
+
+            if (!range_inside(structure_end, position, property_value_length)) {
                 return ASTRA_FDT_INVALID_STRUCTURE;
             }
-
             property_value = &checked_view.data[position];
-            position += value_length;
+            position += property_value_length;
             if (!align4(position, &position) || position > structure_end) {
                 return ASTRA_FDT_INVALID_STRUCTURE;
             }
-            if (name_offset >= checked_view.strings_size) {
+            if (property_name_offset >= checked_view.strings_size) {
                 return ASTRA_FDT_INVALID_STRINGS;
             }
 
-            property_name_start = checked_view.strings_offset + name_offset;
-            property_name_length = 0;
-            while (name_offset + property_name_length < checked_view.strings_size &&
+            property_name_start = checked_view.strings_offset + property_name_offset;
+            while (property_name_length <
+                checked_view.strings_size - property_name_offset &&
                 checked_view.data[property_name_start + property_name_length] != 0u) {
                 property_name_length++;
             }
-            if (name_offset + property_name_length >= checked_view.strings_size) {
+            if (property_name_length >=
+                checked_view.strings_size - property_name_offset) {
                 return ASTRA_FDT_INVALID_STRINGS;
             }
 
             property_name = &checked_view.data[property_name_start];
-            if (depth == 1u &&
-                bytes_equal_text(property_name, property_name_length, name, name_length)) {
+            if (depth == segment_count + 1u &&
+                prefix_matches[segment_count] &&
+                bytes_equal_text(
+                    property_name,
+                    property_name_length,
+                    name,
+                    name_length
+                )) {
                 *value_out = property_value;
-                *value_length_out = value_length;
+                *value_length_out = property_value_length;
                 return ASTRA_FDT_OK;
             }
         } else if (token == (uint32_t)FDT_TOKEN_NOP) {
             continue;
         } else if (token == (uint32_t)FDT_TOKEN_END) {
-            if (!root_seen || depth != 0u) {
-                return ASTRA_FDT_INVALID_STRUCTURE;
-            }
             return ASTRA_FDT_PROPERTY_NOT_FOUND;
         } else {
             return ASTRA_FDT_INVALID_STRUCTURE;
         }
     }
+
     return ASTRA_FDT_INVALID_STRUCTURE;
+}
+
+AstraFdtResult astra_fdt_root_property(
+    const AstraFdtView *view,
+    const char *name,
+    size_t name_length,
+    const uint8_t **value_out,
+    size_t *value_length_out
+) {
+    return astra_fdt_node_property(
+        view,
+        "/",
+        1u,
+        name,
+        name_length,
+        value_out,
+        value_length_out
+    );
 }
 
 const char *astra_fdt_result_name(AstraFdtResult result) {
