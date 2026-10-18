@@ -1,4 +1,5 @@
 #include "boot_info.h"
+#include "framebuffer.h"
 #include "memory.h"
 #include "uart.h"
 #include "vfs.h"
@@ -513,6 +514,7 @@ void astra_kernel_main(const AstraBootInfo *boot_info) {
     char line[KERNEL_LINE_CAP];
     AstraVfsResult result = ASTRA_VFS_OK;
 
+    astra_framebuffer_init(boot_info);
     astra_uart_init();
     astra_uart_puts("\n================================\n");
     astra_uart_puts("          ASTRAOS KERNEL\n");
