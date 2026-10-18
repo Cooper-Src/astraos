@@ -391,6 +391,95 @@ cleanup:
     return status;
 }
 
+static void clear_framebuffer_info(AstraBootInfo *boot_info) {
+    boot_info->framebuffer_base = 0;
+    boot_info->framebuffer_size = 0;
+    boot_info->framebuffer_width = 0;
+    boot_info->framebuffer_height = 0;
+    boot_info->framebuffer_pixels_per_scanline = 0;
+    boot_info->framebuffer_pixel_format = GOP_PIXEL_BLT_ONLY;
+    boot_info->framebuffer_red_mask = 0;
+    boot_info->framebuffer_green_mask = 0;
+    boot_info->framebuffer_blue_mask = 0;
+    boot_info->framebuffer_reserved_mask = 0;
+}
+
+/* Copy validated GOP metadata into the boot contract; no protocol pointer escapes. */
+static void capture_framebuffer(EFI_BOOT_SERVICES *boot_services, AstraBootInfo *boot_info) {
+    EFI_STATUS status = EFI_UNSUPPORTED;
+    void *interface = NULL;
+    EFI_GRAPHICS_OUTPUT_PROTOCOL *gop = NULL;
+    EFI_GOP_MODE *mode = NULL;
+    EFI_GOP_MODE_INFO *info = NULL;
+    EFI_UINT64 pixels = 0;
+    EFI_UINT64 required_bytes = 0;
+    EFI_UINT32 mask_union = 0;
+
+    clear_framebuffer_info(boot_info);
+    if (boot_services == NULL || boot_services->LocateProtocol == NULL) {
+        return;
+    }
+
+    status = boot_services->LocateProtocol(&g_graphics_output_guid, NULL, &interface);
+    if (status != EFI_SUCCESS || interface == NULL) {
+        return;
+    }
+    gop = (EFI_GRAPHICS_OUTPUT_PROTOCOL *)interface;
+    mode = gop->Mode;
+    if (mode == NULL || mode->Info == NULL ||
+        mode->SizeOfInfo < (EFI_UINTN)sizeof(EFI_GOP_MODE_INFO) ||
+        mode->FrameBufferBase == 0 || mode->FrameBufferSize == 0) {
+        return;
+    }
+
+    info = mode->Info;
+    if (info->HorizontalResolution < 8u || info->VerticalResolution < 16u ||
+        info->HorizontalResolution > GOP_MAX_DIMENSION ||
+        info->VerticalResolution > GOP_MAX_DIMENSION ||
+        info->PixelsPerScanLine < info->HorizontalResolution ||
+        info->PixelsPerScanLine > GOP_MAX_DIMENSION ||
+        info->PixelFormat > GOP_PIXEL_BITMASK ||
+        info->PixelFormat == GOP_PIXEL_BLT_ONLY) {
+        return;
+    }
+
+    pixels = (EFI_UINT64)info->PixelsPerScanLine * (EFI_UINT64)info->VerticalResolution;
+    if (pixels > UINT64_MAX / UINT64_C(4)) {
+        return;
+    }
+    required_bytes = pixels * UINT64_C(4);
+    if (required_bytes > (EFI_UINT64)mode->FrameBufferSize) {
+        return;
+    }
+
+    if (info->PixelFormat == GOP_PIXEL_BITMASK) {
+        mask_union = info->PixelInformation.RedMask |
+            info->PixelInformation.GreenMask |
+            info->PixelInformation.BlueMask |
+            info->PixelInformation.ReservedMask;
+        if (mask_union == 0u ||
+            (info->PixelInformation.RedMask & info->PixelInformation.GreenMask) != 0u ||
+            (info->PixelInformation.RedMask & info->PixelInformation.BlueMask) != 0u ||
+            (info->PixelInformation.RedMask & info->PixelInformation.ReservedMask) != 0u ||
+            (info->PixelInformation.GreenMask & info->PixelInformation.BlueMask) != 0u ||
+            (info->PixelInformation.GreenMask & info->PixelInformation.ReservedMask) != 0u ||
+            (info->PixelInformation.BlueMask & info->PixelInformation.ReservedMask) != 0u) {
+            return;
+        }
+    }
+
+    boot_info->framebuffer_base = mode->FrameBufferBase;
+    boot_info->framebuffer_size = (EFI_UINT64)mode->FrameBufferSize;
+    boot_info->framebuffer_width = info->HorizontalResolution;
+    boot_info->framebuffer_height = info->VerticalResolution;
+    boot_info->framebuffer_pixels_per_scanline = info->PixelsPerScanLine;
+    boot_info->framebuffer_pixel_format = info->PixelFormat;
+    boot_info->framebuffer_red_mask = info->PixelInformation.RedMask;
+    boot_info->framebuffer_green_mask = info->PixelInformation.GreenMask;
+    boot_info->framebuffer_blue_mask = info->PixelInformation.BlueMask;
+    boot_info->framebuffer_reserved_mask = info->PixelInformation.ReservedMask;
+}
+
 static void stop_forever(void) {
     for (;;) {
         __asm__ volatile("wfe");
