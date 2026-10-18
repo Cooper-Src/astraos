@@ -516,6 +516,11 @@ void astra_kernel_main(const AstraBootInfo *boot_info) {
 
     astra_framebuffer_init(boot_info);
     astra_uart_init();
+    if (astra_framebuffer_is_active()) {
+        astra_uart_puts("GOP framebuffer console active.\n");
+    } else {
+        astra_uart_puts("GOP framebuffer console unavailable; serial remains active.\n");
+    }
     astra_uart_puts("\n================================\n");
     astra_uart_puts("          ASTRAOS KERNEL\n");
     astra_uart_puts("================================\n");
