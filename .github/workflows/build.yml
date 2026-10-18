@@ -69,8 +69,41 @@ jobs:
           {
             # Wait for the kernel prompt, then inject commands slowly enough for a UART FIFO.
             sleep 3
-            commands=
-
+            commands='help|whoami|mkdir /tmp/ci|write /tmp/ci/probe kernel-vfs-ok|cat /tmp/ci/probe|'
+            for ((i = 0; i < ${#commands}; i++)); do
+              char="${commands:i:1}"
+              if [[ "$char" == "|" ]]; then
+                printf '%b' '\015'
+              else
+                printf '%s' "$char"
+              fi
+              sleep 0.01
+            done
+            sleep 2
+          } | timeout 35s qemu-system-aarch64 \
+            -machine virt -cpu cortex-a72 -m 1024 \
+            -drive if=pflash,format=raw,unit=0,readonly=on,file="$CODE" \
+            -drive if=pflash,format=raw,unit=1,file=build/uefi-vars.fd \
+            -cdrom build/astraos-aarch64.iso -boot order=d \
+            -display none -serial stdio -monitor none \
+            > build/qemu-boot.log 2>&1
+          QEMU_STATUS=$?
+          set -e
+          cat build/qemu-boot.log
+          # The interactive live shell intentionally keeps running. Timeout is expected.
+          if ! grep -q "AstraOS kernel 0.2" build/qemu-boot.log; then
+            echo "AstraOS kernel startup marker not found in QEMU console log (exit $QEMU_STATUS)." >&2
+            exit 1
+          fi
+          if ! grep -q "root@astra:/#" build/qemu-boot.log; then
+            echo "Kernel did not reach the interactive root prompt." >&2
+            exit 1
+          fi
+          if ! grep -q "kernel-vfs-ok" build/qemu-boot.log; then
+            echo "Kernel shell did not complete create/write/read regression commands." >&2
+            exit 1
+          fi
+          echo "AstraOS kernel startup, interactive shell, and VFS smoke tests verified."
       - name: Upload ISO and checksums
         uses: actions/upload-artifact@v4
         with:
