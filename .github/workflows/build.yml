@@ -120,7 +120,7 @@ jobs:
               sleep 0.01
             done
             sleep 2
-          } | timeout 35s qemu-system-aarch64 \
+          } | timeout -k 5s 35s qemu-system-aarch64 \
             -machine virt -cpu cortex-a72 -m 1024 \
             -drive if=pflash,format=raw,unit=0,readonly=on,file="$CODE" \
             -drive if=pflash,format=raw,unit=1,file=build/uefi-vars.fd \
@@ -177,7 +177,7 @@ jobs:
           fi
           cp "$VARS_TEMPLATE" build/uefi-gop-vars.fd
           set +e
-          timeout 20s qemu-system-aarch64 \
+          timeout -k 5s 20s qemu-system-aarch64 \
             -machine virt -cpu cortex-a72 -m 1024 \
             -device ramfb \
             -drive if=pflash,format=raw,unit=0,readonly=on,file="$CODE" \
