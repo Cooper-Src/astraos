@@ -41,6 +41,7 @@ Install QEMU ARM64 and an AArch64 UEFI firmware package (for example, `qemu-efi-
     cp "$VARS_TEMPLATE" /tmp/astraos-vars.fd
     qemu-system-aarch64 \
       -machine virt -cpu cortex-a72 -m 1024 \
+      -device ramfb \
       -drive if=pflash,format=raw,unit=0,readonly=on,file="$CODE" \
       -drive if=pflash,format=raw,unit=1,file=/tmp/astraos-vars.fd \
       -cdrom build/astraos-aarch64.iso -boot order=d \
