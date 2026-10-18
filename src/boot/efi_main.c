@@ -404,6 +404,16 @@ static void clear_framebuffer_info(AstraBootInfo *boot_info) {
     boot_info->framebuffer_reserved_mask = 0;
 }
 
+static bool mask_is_contiguous(EFI_UINT32 mask) {
+    if (mask == 0u) {
+        return false;
+    }
+    while ((mask & 1u) == 0u) {
+        mask >>= 1u;
+    }
+    return (mask & (mask + 1u)) == 0u;
+}
+
 /* Copy validated GOP metadata into the boot contract; no protocol pointer escapes. */
 static void capture_framebuffer(EFI_BOOT_SERVICES *boot_services, AstraBootInfo *boot_info) {
     EFI_STATUS status = EFI_UNSUPPORTED;
@@ -428,7 +438,9 @@ static void capture_framebuffer(EFI_BOOT_SERVICES *boot_services, AstraBootInfo 
     mode = gop->Mode;
     if (mode == NULL || mode->Info == NULL ||
         mode->SizeOfInfo < (EFI_UINTN)sizeof(EFI_GOP_MODE_INFO) ||
-        mode->FrameBufferBase == 0 || mode->FrameBufferSize == 0) {
+        mode->FrameBufferBase == 0 ||
+        mode->FrameBufferBase > (EFI_UINT64)UINTPTR_MAX ||
+        mode->FrameBufferSize == 0) {
         return;
     }
 
@@ -448,7 +460,8 @@ static void capture_framebuffer(EFI_BOOT_SERVICES *boot_services, AstraBootInfo 
         return;
     }
     required_bytes = pixels * UINT64_C(4);
-    if (required_bytes > (EFI_UINT64)mode->FrameBufferSize) {
+    if (required_bytes > (EFI_UINT64)mode->FrameBufferSize ||
+        mode->FrameBufferBase > UINT64_MAX - required_bytes) {
         return;
     }
 
@@ -458,6 +471,11 @@ static void capture_framebuffer(EFI_BOOT_SERVICES *boot_services, AstraBootInfo 
             info->PixelInformation.BlueMask |
             info->PixelInformation.ReservedMask;
         if (mask_union == 0u ||
+            !mask_is_contiguous(info->PixelInformation.RedMask) ||
+            !mask_is_contiguous(info->PixelInformation.GreenMask) ||
+            !mask_is_contiguous(info->PixelInformation.BlueMask) ||
+            (info->PixelInformation.ReservedMask != 0u &&
+                !mask_is_contiguous(info->PixelInformation.ReservedMask)) ||
             (info->PixelInformation.RedMask & info->PixelInformation.GreenMask) != 0u ||
             (info->PixelInformation.RedMask & info->PixelInformation.BlueMask) != 0u ||
             (info->PixelInformation.RedMask & info->PixelInformation.ReservedMask) != 0u ||
