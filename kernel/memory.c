@@ -81,8 +81,13 @@ AstraMemoryResult astra_memory_init(AstraMemory *memory, const AstraBootInfo *bo
         boot_info->version != ASTRA_BOOT_INFO_VERSION) {
         return ASTRA_MEMORY_INVALID_BOOT_INFO;
     }
-    if (boot_info->memory_map == NULL || boot_info->memory_map_size == 0 ||
+    if (boot_info->memory_map == NULL ||
+        boot_info->memory_map_size == 0 ||
+        boot_info->memory_map_size > ASTRA_BOOT_MEMORY_MAP_CAP_BYTES ||
+        boot_info->memory_map_size > (uint64_t)SIZE_MAX ||
         boot_info->memory_descriptor_size < (uint64_t)EFI_MEMORY_DESCRIPTOR_MIN_SIZE ||
+        boot_info->memory_descriptor_size > (uint64_t)SIZE_MAX ||
+        boot_info->memory_descriptor_size > boot_info->memory_map_size ||
         boot_info->memory_map_size % boot_info->memory_descriptor_size != 0) {
         return ASTRA_MEMORY_INVALID_MAP;
     }

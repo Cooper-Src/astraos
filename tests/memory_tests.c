@@ -153,6 +153,13 @@ static void test_invalid_maps_are_rejected(void) {
     info = make_boot_info(41u, 40u);
     CHECK(astra_memory_init(&g_memory, &info) == ASTRA_MEMORY_INVALID_MAP);
 
+    info = make_boot_info(TEST_MAP_BYTES, TEST_DESCRIPTOR_BYTES * 2u);
+    CHECK(astra_memory_init(&g_memory, &info) == ASTRA_MEMORY_INVALID_MAP);
+
+    info = make_boot_info(TEST_MAP_BYTES, TEST_DESCRIPTOR_BYTES);
+    info.memory_map_size = ASTRA_BOOT_MEMORY_MAP_CAP_BYTES + UINT64_C(1);
+    CHECK(astra_memory_init(&g_memory, &info) == ASTRA_MEMORY_INVALID_MAP);
+
     info = make_boot_info(TEST_MAP_BYTES, TEST_DESCRIPTOR_BYTES);
     info.magic = 0;
     CHECK(astra_memory_init(&g_memory, &info) == ASTRA_MEMORY_INVALID_BOOT_INFO);
