@@ -136,7 +136,7 @@ static void test_invalid_names_paths_and_capacity(void) {
     char long_name[ASTRA_VFS_NAME_CAP + 8u];
     char overlong_path[ASTRA_VFS_PATH_CAP + 1u];
     AstraVfsEntry entries[2];
-    AstraVfsEntry sentinel;
+    AstraVfsEntry sentinel = {0};
     size_t count = 0;
 
     CHECK(astra_vfs_init(&fs) == ASTRA_VFS_OK);
