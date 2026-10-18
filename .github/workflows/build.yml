@@ -71,7 +71,7 @@ jobs:
           set +e
           {
             # Wait for the kernel prompt, then inject commands slowly enough for a UART FIFO.
-            sleep 3
+            sleep 8
             commands='help|whoami|mkdir /tmp/ci|write /tmp/ci/probe kernel-vfs-ok|cat /tmp/ci/probe|'
             for ((i = 0; i < ${#commands}; i++)); do
               char="${commands:i:1}"
@@ -102,11 +102,23 @@ jobs:
             echo "Kernel did not reach the interactive root prompt." >&2
             exit 1
           fi
-          if ! grep -q "kernel-vfs-ok" build/qemu-boot.log; then
-            echo "Kernel shell did not complete create/write/read regression commands." >&2
+          if ! grep -q "directory created" build/qemu-boot.log; then
+            echo "Kernel shell did not create the test directory." >&2
             exit 1
           fi
-          echo "AstraOS kernel startup, interactive shell, and VFS smoke tests verified."
+          if ! grep -q "written" build/qemu-boot.log; then
+            echo "Kernel shell did not complete the file write." >&2
+            exit 1
+          fi
+          if ! tr -d '\r' < build/qemu-boot.log | grep -qx "kernel-vfs-ok"; then
+            echo "Kernel shell did not read back the exact file content." >&2
+            exit 1
+          fi
+          if ! tr -d '\r' < build/qemu-boot.log | grep -qx "root"; then
+            echo "whoami command did not return the root identity." >&2
+            exit 1
+          fi
+          echo "AstraOS boot, root prompt, identity, and create/write/read behavior verified."
 
       - name: Upload ISO and kernel artifacts
         uses: actions/upload-artifact@v4
