@@ -66,13 +66,13 @@ static void test_clear_and_escape_sequences(void) {
     info = make_boot_info();
     astra_framebuffer_init(&info);
     astra_framebuffer_put_byte((uint8_t)'X');
-    CHECK(g_pixels[(size_t)TEST_FB_WIDTH + 3u] == UINT32_C(0xfff0f4f8));
+    CHECK(g_pixels[(size_t)TEST_FB_WIDTH + 1u] == UINT32_C(0xfff0f4f8));
 
     astra_framebuffer_put_byte(27u);
     astra_framebuffer_put_byte((uint8_t)'[');
     astra_framebuffer_put_byte((uint8_t)'2');
     astra_framebuffer_put_byte((uint8_t)'J');
-    CHECK(g_pixels[(size_t)TEST_FB_WIDTH + 3u] == UINT32_C(0xff080e18));
+    CHECK(g_pixels[(size_t)TEST_FB_WIDTH + 1u] == UINT32_C(0xff080e18));
 
     astra_framebuffer_put_byte(27u);
     astra_framebuffer_put_byte((uint8_t)'[');
