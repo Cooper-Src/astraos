@@ -9,9 +9,10 @@ AstraOS is an experimental from-scratch ARM64 operating-system project. The curr
 - `EFI/BOOT/BOOTAA64.EFI`: AArch64 PE/COFF UEFI loader.
 - `kernel.bin`: flat freestanding AArch64 kernel linked at `0x40200000`.
 - `kernel.elf`: ELF kernel build for symbol inspection and debugging.
-- UEFI loader reads `kernel.bin` from the FAT ESP, reserves a fixed 2 MiB load region, copies/zeros kernel memory, captures the UEFI memory map and optional GOP framebuffer metadata, calls `ExitBootServices`, then transfers control to the kernel.
+- UEFI loader reads `kernel.bin` from the FAT ESP, reserves a fixed 2 MiB load region, copies/zeros kernel memory, captures the UEFI memory map and optional GOP framebuffer metadata, and captures the standard UEFI device-tree configuration table when present. The loader validates the FDT header, block ranges, and reservation map before calling `ExitBootServices` and transferring control to the kernel.
 - Kernel entry installs its own stack and masks interrupts. It owns a bounded shell, an in-memory VFS, a physical-page allocator, a polling PL011 serial driver, and a software-rendered text console for supported GOP framebuffer formats.
 - The fixed-size VFS has bounded path/content interfaces and owner/mode checks. The early page allocator parses UEFI descriptors, tracks conventional 4 KiB pages with bitmaps, rejects overlapping memory ranges, reserves page zero, and currently manages physical memory below 4 GiB.
+- `kernel/fdt.[ch]` validates FDT v17-compatible headers, size/offset arithmetic, non-overlapping blocks, and the reservation-map terminator. The kernel revalidates the passed blob and can safely read the root `model` property. Sanitizer tests cover malformed headers, block ranges, and property bounds.
 - These checks still run in a single kernel address space. There is no userspace isolation, syscall boundary, scheduler, password authentication, or persistent storage.
 
 ## Build
@@ -79,7 +80,7 @@ The `palloc` command reserves one 4 KiB physical page; `pfree HEX_ADDRESS` retur
 
 The kernel is freestanding, but not hardened for multi-user use. UID and mode checks are enforced inside one address space and can be bypassed by kernel code. No process isolation, syscall boundary, scheduler, or credentials store exist yet.
 
-The GOP console uses firmware-provided linear framebuffer metadata after `ExitBootServices`; it does not call firmware services while the kernel runs. Whether that framebuffer is safe to use depends on the firmware's handoff and memory mapping. The input path remains QEMU-virt-specific. Real hardware needs boot-time ACPI/device-tree discovery, physical mapping validation, timers/interrupt controllers, native UART or USB HID input, and platform-specific drivers. A successful QEMU boot is not proof of a successful boot on a laptop or phone.
+The GOP console uses firmware-provided linear framebuffer metadata after `ExitBootServices`; it does not call firmware services while the kernel runs. Whether that framebuffer is safe to use depends on the firmware's handoff and memory mapping. The kernel can accept the FDT configuration table defined by UEFI, but it does not yet select among multiple vendor-packed DTBs or enumerate/initialize devices from the tree. The input and PL011 UART path remain QEMU-virt-specific. Real hardware needs boot-time ACPI/device-tree discovery, physical mapping validation, timers/interrupt controllers, native UART or USB HID input, and platform-specific drivers. A successful QEMU boot is not proof of a successful boot on a laptop or phone.
 
 ## Roadmap
 
