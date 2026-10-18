@@ -1,5 +1,6 @@
 #include "platform.h"
 
+#include "acpi.h"
 #include "fdt.h"
 
 #include <stddef.h>
@@ -263,7 +264,10 @@ static bool platform_string_list_contains(
     return found;
 }
 
-bool astra_platform_find_pl011_uart(const AstraBootInfo *boot_info, uint64_t *base_out) {
+bool astra_platform_find_pl011_uart_from_fdt(
+    const AstraBootInfo *boot_info,
+    uint64_t *base_out
+) {
     AstraFdtView view = {0};
     AstraFdtResult result = ASTRA_FDT_OK;
     char node_path[PLATFORM_PATH_CAP] = {0};
@@ -370,4 +374,25 @@ bool astra_platform_find_pl011_uart(const AstraBootInfo *boot_info, uint64_t *ba
 
     *base_out = base;
     return true;
+}
+
+bool astra_platform_find_pl011_uart(
+    const AstraBootInfo *boot_info,
+    uint64_t *base_out
+) {
+    uint64_t fdt_base = 0u;
+    AstraAcpiSpcr spcr = {0};
+
+    if (base_out == NULL) {
+        return false;
+    }
+    if (astra_platform_find_pl011_uart_from_fdt(boot_info, &fdt_base)) {
+        *base_out = fdt_base;
+        return true;
+    }
+    if (astra_acpi_find_pl011_uart(boot_info, &spcr)) {
+        *base_out = spcr.base_address;
+        return true;
+    }
+    return false;
 }

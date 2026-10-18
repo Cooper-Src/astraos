@@ -240,6 +240,14 @@ static const EFI_GUID g_dtb_table_guid = {
     0xb1b621d5u, 0xf19cu, 0x41a5u,
     {0x83u, 0x0bu, 0xd9u, 0x15u, 0x2cu, 0x69u, 0xaau, 0xe0u}
 };
+static const EFI_GUID g_acpi20_table_guid = {
+    0x8868e871u, 0xe4f1u, 0x11d3u,
+    {0xbcu, 0x22u, 0x00u, 0x80u, 0xc7u, 0x3cu, 0x88u, 0x81u}
+};
+static const EFI_GUID g_acpi10_table_guid = {
+    0xeb9d2d30u, 0x2d88u, 0x11d3u,
+    {0x9au, 0x16u, 0x00u, 0x90u, 0x27u, 0x3fu, 0xc1u, 0x4du}
+};
 static CHAR16 g_kernel_file_name[] = L"kernel.bin";
 static CHAR16 g_platform_dtb_file_name[] = L"platform.dtb";
 static EFI_UINT8 g_kernel_staging[KERNEL_STAGING_CAP];
@@ -539,6 +547,61 @@ static bool find_dtb_available_size(
     }
 
     return false;
+}
+
+/* The kernel validates this pointer against the final UEFI memory map. */
+static bool capture_acpi_rsdp_from_guid(
+    EFI_SYSTEM_TABLE *system_table,
+    const EFI_GUID *guid,
+    EFI_UINT64 *address_out
+) {
+    enum { MAX_CONFIGURATION_TABLES = 4096u };
+    EFI_CONFIGURATION_TABLE *tables = NULL;
+
+    if (system_table == NULL || guid == NULL || address_out == NULL ||
+        system_table->ConfigurationTable == NULL ||
+        system_table->NumberOfTableEntries == 0u ||
+        system_table->NumberOfTableEntries > (EFI_UINTN)MAX_CONFIGURATION_TABLES) {
+        return false;
+    }
+
+    tables = system_table->ConfigurationTable;
+    for (EFI_UINTN i = 0u; i < system_table->NumberOfTableEntries; i++) {
+        EFI_UINT64 address = 0u;
+
+        if (!guid_equal(&tables[i].VendorGuid, guid) ||
+            tables[i].VendorTable == NULL) {
+            continue;
+        }
+        address = (EFI_UINT64)(uintptr_t)tables[i].VendorTable;
+        if (address == 0u) {
+            continue;
+        }
+        *address_out = address;
+        return true;
+    }
+    return false;
+}
+
+static void capture_acpi_rsdp(
+    EFI_SYSTEM_TABLE *system_table,
+    AstraBootInfo *boot_info
+) {
+    if (boot_info == NULL) {
+        return;
+    }
+    boot_info->acpi_rsdp_base = 0u;
+    if (capture_acpi_rsdp_from_guid(
+            system_table, &g_acpi20_table_guid, &boot_info->acpi_rsdp_base
+        )) {
+        loader_out(L"ACPI 2.0+ RSDP pointer captured for validated kernel discovery.\r\n");
+        return;
+    }
+    if (capture_acpi_rsdp_from_guid(
+            system_table, &g_acpi10_table_guid, &boot_info->acpi_rsdp_base
+        )) {
+        loader_out(L"ACPI 1.0 RSDP pointer captured for kernel discovery.\r\n");
+    }
 }
 
 /* The firmware owns the DTB memory; the kernel borrows it after ExitBootServices. */
@@ -907,6 +970,7 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *system_table) {
     clear_framebuffer_info(&g_boot_info);
     capture_framebuffer(boot_services, &g_boot_info);
     capture_device_tree(image, system_table, &g_boot_info);
+    capture_acpi_rsdp(system_table, &g_boot_info);
 
     if (g_boot_info.framebuffer_base != 0) {
         loader_out(L"UEFI GOP framebuffer discovered.\r\n");

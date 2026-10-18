@@ -1,4 +1,5 @@
 #include "boot_info.h"
+#include "acpi.h"
 #include "framebuffer.h"
 #include "fdt.h"
 #include "memory.h"
@@ -304,18 +305,28 @@ static void command_dispatch(const char *command, size_t command_len,
     } else if (token_equals(command, command_len, "about")) {
         astra_uart_puts(
             "AstraOS kernel 0.2: freestanding AArch64 kernel.\n"
-            "UEFI is used only for boot and the memory-map handoff.\n"
-            "The console uses QEMU virt PL011 UART; hardware support is early.\n"
+            "UEFI is used for boot, device discovery, and the memory-map handoff.\n"
+            "The console uses a validated FDT or ACPI SPCR PL011 when available.\n"
+            "Framebuffer-only platforms still need a native input driver.\n"
         );
     } else if (token_equals(command, command_len, "uname")) {
         astra_uart_puts("AstraOS astra-aarch64 0.2 kernel\n");
     } else if (token_equals(command, command_len, "platform")) {
+        AstraAcpiSpcr spcr = {0};
+
         if (args_len != 0u) {
             astra_uart_puts("usage: platform\n");
             return;
         }
         astra_uart_puts("Platform diagnostics:\n");
         print_device_tree_info(boot_info);
+        if (astra_acpi_find_pl011_uart(boot_info, &spcr)) {
+            astra_uart_puts("ACPI SPCR PL011 base: ");
+            astra_uart_put_hex(spcr.base_address);
+            astra_uart_puts("\n");
+        } else {
+            astra_uart_puts("ACPI SPCR: no supported PL011 console advertised.\n");
+        }
     } else if (token_equals(command, command_len, "mem")) {
         AstraMemoryStats stats = {0};
         AstraMemoryResult memory_result = ASTRA_MEMORY_OK;

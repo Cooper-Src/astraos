@@ -1,5 +1,6 @@
 #include "uart.h"
 
+#include "acpi.h"
 #include "framebuffer.h"
 #include "platform.h"
 
@@ -20,24 +21,63 @@ enum {
 
 static volatile uint32_t *g_uart = NULL;
 
-/* A false result keeps all output on the framebuffer and performs no UART MMIO. */
+/* FDT-described QEMU/board hardware uses the configured AstraOS console rate. */
+static bool uart_init_from_fdt(uint64_t uart_base) {
+    volatile uint32_t *uart = (volatile uint32_t *)(uintptr_t)uart_base;
+
+    uart[UART_CONTROL] = 0u;
+    uart[UART_INTERRUPT_MASK] = 0u;
+    uart[UART_INTERRUPT_CLEAR] = 0x7ffu;
+    uart[UART_INTEGER_BAUD] = 13u;
+    uart[UART_FRACTIONAL_BAUD] = 1u;
+    uart[UART_LINE_CONTROL] = UART_LINE_8_BITS_FIFO;
+    uart[UART_CONTROL] = UART_CONTROL_ENABLE;
+    g_uart = uart;
+    return true;
+}
+
+/* ACPI SPCR advertises the firmware console. Preserve its baud divisor instead
+ * of assuming that every platform clocks a PL011 at QEMU's 24 MHz rate. */
+static bool uart_init_from_acpi(const AstraBootInfo *boot_info) {
+    AstraAcpiSpcr spcr = {0};
+    volatile uint32_t *uart = NULL;
+    uint32_t integer_baud = 0u;
+    uint32_t fractional_baud = 0u;
+    uint32_t line_control = 0u;
+
+    if (!astra_acpi_find_pl011_uart(boot_info, &spcr)) {
+        return false;
+    }
+
+    uart = (volatile uint32_t *)(uintptr_t)spcr.base_address;
+    integer_baud = uart[UART_INTEGER_BAUD];
+    fractional_baud = uart[UART_FRACTIONAL_BAUD];
+    line_control = uart[UART_LINE_CONTROL];
+    if (integer_baud == 0u || integer_baud > 0xffffu ||
+        fractional_baud > 0x3fu || line_control == 0u) {
+        return false;
+    }
+
+    uart[UART_CONTROL] = 0u;
+    uart[UART_INTERRUPT_MASK] = 0u;
+    uart[UART_INTERRUPT_CLEAR] = 0x7ffu;
+    uart[UART_INTEGER_BAUD] = integer_baud;
+    uart[UART_FRACTIONAL_BAUD] = fractional_baud;
+    uart[UART_LINE_CONTROL] = line_control;
+    uart[UART_CONTROL] = UART_CONTROL_ENABLE;
+    g_uart = uart;
+    return true;
+}
+
+/* Failure leaves the framebuffer available and never probes an assumed address. */
 bool astra_uart_init(const AstraBootInfo *boot_info) {
     uint64_t uart_base = 0u;
 
     g_uart = NULL;
-    if (!astra_platform_find_pl011_uart(boot_info, &uart_base)) {
-        return false;
+    if (astra_platform_find_pl011_uart_from_fdt(boot_info, &uart_base)) {
+        return uart_init_from_fdt(uart_base);
     }
-
-    g_uart = (volatile uint32_t *)(uintptr_t)uart_base;
-    g_uart[UART_CONTROL] = 0u;
-    g_uart[UART_INTERRUPT_MASK] = 0u;
-    g_uart[UART_INTERRUPT_CLEAR] = 0x7ffu;
-    g_uart[UART_INTEGER_BAUD] = 13u;
-    g_uart[UART_FRACTIONAL_BAUD] = 1u;
-    g_uart[UART_LINE_CONTROL] = UART_LINE_8_BITS_FIFO;
-    g_uart[UART_CONTROL] = UART_CONTROL_ENABLE;
-    return true;
+    return uart_init_from_acpi(boot_info);
 }
 
 void astra_uart_put_byte(uint8_t value) {
