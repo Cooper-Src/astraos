@@ -165,6 +165,69 @@ jobs:
           fi
           echo "AstraOS boot, root prompt, identity, and create/write/read behavior verified."
 
+      - name: Smoke-test external platform.dtb fallback
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tests/make_fdt_fixture.py build/platform.dtb
+          cp -a build/staging build/staging-platform-dtb
+          mcopy -i build/staging-platform-dtb/efiboot.img build/platform.dtb ::/platform.dtb
+          (
+            cd build/staging-platform-dtb
+            xorriso -as mkisofs -r -J -V ASTRAOS-FDT \
+              -o "$PWD/../astraos-platform-dtb.iso" \
+              -e efiboot.img -no-emul-boot \
+              -append_partition 2 0xef efiboot.img .
+          )
+
+          CODE="$(find /usr/share -name 'AAVMF_CODE.fd' -print -quit)"
+          VARS_TEMPLATE="$(find /usr/share -name 'AAVMF_VARS.fd' -print -quit)"
+          if [[ -z "$CODE" || -z "$VARS_TEMPLATE" ]]; then
+            echo "Could not find AArch64 UEFI firmware files." >&2
+            exit 1
+          fi
+          cp "$VARS_TEMPLATE" build/uefi-platform-vars.fd
+          set +e
+          {
+            sleep 8
+            for char in p l a t f o r m; do
+              printf '%s' "$char"
+              sleep 0.01
+            done
+            printf '%b' '\015'
+            sleep 2
+          } | timeout -k 5s 35s qemu-system-aarch64 \
+            -machine virt -cpu cortex-a72 -m 1024 \
+            -drive if=pflash,format=raw,unit=0,readonly=on,file="$CODE" \
+            -drive if=pflash,format=raw,unit=1,file=build/uefi-platform-vars.fd \
+            -cdrom build/astraos-platform-dtb.iso -boot order=d \
+            -display none -serial stdio -monitor none \
+            > build/qemu-platform-dtb.log 2>&1
+          QEMU_STATUS=$?
+          set -e
+          cat build/qemu-platform-dtb.log
+          if ! grep -q "AstraOS kernel 0.2" build/qemu-platform-dtb.log; then
+            echo "AstraOS failed to boot with the platform.dtb fallback (exit $QEMU_STATUS)." >&2
+            exit 1
+          fi
+          if ! grep -q "Loaded validated platform.dtb fallback." build/qemu-platform-dtb.log; then
+            echo "Loader did not load the optional platform.dtb file." >&2
+            exit 1
+          fi
+          if ! grep -q "Device model: AstraOS CI fixture" build/qemu-platform-dtb.log; then
+            echo "Kernel did not report the model from platform.dtb." >&2
+            exit 1
+          fi
+          if ! grep -q "Device compatible: astraos,ci-fixture, qemu,virt" build/qemu-platform-dtb.log; then
+            echo "Kernel did not report the compatible list from platform.dtb." >&2
+            exit 1
+          fi
+          if ! grep -q "FDT stdout-path: serial0:115200n8" build/qemu-platform-dtb.log; then
+            echo "Kernel did not read /chosen/stdout-path from platform.dtb." >&2
+            exit 1
+          fi
+          echo "External platform.dtb load, validation, and kernel property discovery verified."
+
       - name: Smoke-test optional GOP framebuffer and serial fallback
         shell: bash
         run: |
