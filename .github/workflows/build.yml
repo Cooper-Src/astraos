@@ -81,6 +81,18 @@ jobs:
             kernel/fdt.c tests/fdt_tests.c -o /tmp/astraos-fdt-tests
           UBSAN_OPTIONS=print_stacktrace=1 /tmp/astraos-fdt-tests
 
+      - name: Run FDT-driven UART discovery sanitizer tests
+        run: |
+          clang -std=c17 -g -O0 \
+            -Wall -Wextra -Wpedantic -Wshadow -Wconversion -Wformat=2 \
+            -Wstrict-prototypes -Wmissing-prototypes -Wwrite-strings \
+            -Wcast-qual -Wundef -Wvla -Werror \
+            -fsanitize=address,undefined -fno-sanitize-recover=undefined \
+            -fno-omit-frame-pointer -Ikernel \
+            kernel/fdt.c kernel/platform.c tests/platform_tests.c \
+            -o /tmp/astraos-platform-tests
+          UBSAN_OPTIONS=print_stacktrace=1 /tmp/astraos-platform-tests
+
       - name: Build ARM64 UEFI application and ISO
         run: bash ./scripts/build.sh
 

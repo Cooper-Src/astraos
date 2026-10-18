@@ -646,7 +646,16 @@ void astra_kernel_main(const AstraBootInfo *boot_info) {
     AstraVfsResult result = ASTRA_VFS_OK;
 
     astra_framebuffer_init(boot_info);
-    astra_uart_init();
+    if (!astra_uart_init(boot_info)) {
+        astra_uart_puts("\nAstraOS kernel 0.2 | AArch64 freestanding\n");
+        astra_uart_puts(
+            "No supported arm,pl011 UART was found via the validated FDT stdout-path.\n"
+        );
+        astra_uart_puts(
+            "Framebuffer diagnostics are display-only; this platform has no input driver yet.\n"
+        );
+        return;
+    }
     if (astra_framebuffer_is_active()) {
         astra_uart_puts("GOP framebuffer console active.\n");
     } else {

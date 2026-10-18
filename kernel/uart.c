@@ -1,5 +1,7 @@
 #include "uart.h"
+
 #include "framebuffer.h"
+#include "platform.h"
 
 enum {
     UART_DATA = 0,
@@ -16,24 +18,37 @@ enum {
     UART_CONTROL_ENABLE = (1u << 0) | (1u << 8) | (1u << 9)
 };
 
-static volatile uint32_t *const g_uart =
-    (volatile uint32_t *)(uintptr_t)UINT32_C(0x09000000);
+static volatile uint32_t *g_uart = NULL;
 
-void astra_uart_init(void) {
-    g_uart[UART_CONTROL] = 0;
-    g_uart[UART_INTERRUPT_MASK] = 0;
+/* A false result keeps all output on the framebuffer and performs no UART MMIO. */
+bool astra_uart_init(const AstraBootInfo *boot_info) {
+    uint64_t uart_base = 0u;
+
+    g_uart = NULL;
+    if (!astra_platform_find_pl011_uart(boot_info, &uart_base)) {
+        return false;
+    }
+
+    g_uart = (volatile uint32_t *)(uintptr_t)uart_base;
+    g_uart[UART_CONTROL] = 0u;
+    g_uart[UART_INTERRUPT_MASK] = 0u;
     g_uart[UART_INTERRUPT_CLEAR] = 0x7ffu;
     g_uart[UART_INTEGER_BAUD] = 13u;
     g_uart[UART_FRACTIONAL_BAUD] = 1u;
     g_uart[UART_LINE_CONTROL] = UART_LINE_8_BITS_FIFO;
     g_uart[UART_CONTROL] = UART_CONTROL_ENABLE;
+    return true;
 }
 
 void astra_uart_put_byte(uint8_t value) {
-    while ((g_uart[UART_FLAGS] & UART_FLAG_TX_FULL) != 0) {
+    /* Draw first so a stalled serial device cannot hide the current character. */
+    astra_framebuffer_put_byte(value);
+    if (g_uart == NULL) {
+        return;
+    }
+    while ((g_uart[UART_FLAGS] & UART_FLAG_TX_FULL) != 0u) {
     }
     g_uart[UART_DATA] = (uint32_t)value;
-    astra_framebuffer_put_byte(value);
 }
 
 void astra_uart_write(const char *data, size_t length) {
@@ -61,7 +76,12 @@ void astra_uart_puts(const char *text) {
 }
 
 uint8_t astra_uart_get_byte(void) {
-    while ((g_uart[UART_FLAGS] & UART_FLAG_RX_EMPTY) != 0) {
+    if (g_uart == NULL) {
+        for (;;) {
+            __asm__ volatile("wfe");
+        }
+    }
+    while ((g_uart[UART_FLAGS] & UART_FLAG_RX_EMPTY) != 0u) {
     }
     return (uint8_t)(g_uart[UART_DATA] & 0xffu);
 }
