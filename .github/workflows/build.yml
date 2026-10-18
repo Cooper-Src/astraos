@@ -146,7 +146,7 @@ jobs:
           {
             # Wait for the kernel prompt, then inject commands slowly enough for a UART FIFO.
             sleep 8
-            commands='help|platform|whoami|mkdir /tmp/ci|touch /tmp/ci/probe|write /tmp/ci/probe kernel-vfs-ok|cat /tmp/ci/probe|'
+            commands='help|platform|whoami|mkdir /tmp/ci|touch /tmp/ci/probe|write /tmp/ci/probe kernel-vfs-ok|cat /tmp/ci/probe|exception-test|'
             for ((i = 0; i < ${#commands}; i++)); do
               char="${commands:i:1}"
               if [[ "$char" == "|" ]]; then
@@ -200,7 +200,15 @@ jobs:
             echo "whoami command did not return the root identity." >&2
             exit 1
           fi
-          echo "AstraOS boot, root prompt, identity, and create/write/read behavior verified."
+          if ! grep -q "AstraOS fatal exception" build/qemu-boot.log; then
+            echo "AstraOS did not report the injected synchronous exception." >&2
+            exit 1
+          fi
+          if ! grep -q "Exception class: 0x000000000000003c" build/qemu-boot.log; then
+            echo "BRK exception class was not reported correctly." >&2
+            exit 1
+          fi
+          echo "AstraOS boot, VFS, and fatal BRK exception diagnostics verified."
 
       - name: Smoke-test external platform.dtb fallback
         shell: bash

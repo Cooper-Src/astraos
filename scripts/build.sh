@@ -89,12 +89,17 @@ clang "${KERNEL_FLAGS[@]}" -c "$ROOT/kernel/uart.c" -o "$BUILD/objects/uart.o"
 clang "${KERNEL_FLAGS[@]}" -c "$ROOT/kernel/platform.c" -o "$BUILD/objects/platform.o"
 clang "${KERNEL_FLAGS[@]}" -c "$ROOT/kernel/framebuffer.c" -o "$BUILD/objects/framebuffer.o"
 clang "${KERNEL_FLAGS[@]}" -c "$ROOT/kernel/fdt.c" -o "$BUILD/objects/fdt.o"
+clang "${KERNEL_FLAGS[@]}" -c "$ROOT/kernel/exceptions.c" -o "$BUILD/objects/exceptions.o"
 clang --target=aarch64-none-elf -ffreestanding -fno-pic -fno-pie \
   -mcpu=cortex-a72 -c "$ROOT/kernel/entry.S" -o "$BUILD/objects/entry.o"
+clang --target=aarch64-none-elf -ffreestanding -fno-pic -fno-pie \
+  -mcpu=cortex-a72 -c "$ROOT/kernel/exceptions.S" -o "$BUILD/objects/exception_vectors.o"
 
 KERNEL_OBJECTS=(
   "$BUILD/objects/entry.o"
+  "$BUILD/objects/exception_vectors.o"
   "$BUILD/objects/kernel_main.o"
+  "$BUILD/objects/exceptions.o"
   "$BUILD/objects/vfs.o"
   "$BUILD/objects/memory.o"
   "$BUILD/objects/acpi.o"

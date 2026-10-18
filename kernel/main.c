@@ -2,6 +2,7 @@
 #include "acpi.h"
 #include "framebuffer.h"
 #include "fdt.h"
+#include "exceptions.h"
 #include "memory.h"
 #include "uart.h"
 #include "vfs.h"
@@ -296,7 +297,7 @@ static void command_dispatch(const char *command, size_t command_len,
         astra_uart_puts(
             "AstraOS kernel commands:\n"
             "  help, about, uname, platform, mem\n"
-            "  palloc, pfree HEX_ADDRESS, clear, halt\n"
+            "  palloc, pfree HEX_ADDRESS, clear, halt, exception-test\n"
             "  pwd, ls [PATH], cd PATH, cat PATH\n"
             "  touch PATH, mkdir PATH, write PATH TEXT, rm PATH\n"
             "  chmod OCTAL PATH, whoami, id, su astra\n"
@@ -412,6 +413,16 @@ static void command_dispatch(const char *command, size_t command_len,
         astra_uart_puts("\x1b[2J\x1b[H");
     } else if (token_equals(command, command_len, "halt")) {
         astra_uart_puts("AstraOS halted. Reset the machine to reboot.\n");
+        for (;;) {
+            __asm__ volatile("wfe");
+        }
+    } else if (token_equals(command, command_len, "exception-test")) {
+        if (args_len != 0u) {
+            astra_uart_puts("usage: exception-test\n");
+            return;
+        }
+        astra_uart_puts("Triggering a synchronous BRK exception.\n");
+        __asm__ volatile("brk #0");
         for (;;) {
             __asm__ volatile("wfe");
         }
