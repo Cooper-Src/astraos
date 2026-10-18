@@ -415,6 +415,109 @@ static bool guid_equal(const EFI_GUID *left, const EFI_GUID *right) {
     return true;
 }
 
+enum {
+    EFI_MEMORY_DESCRIPTOR_MIN_SIZE = 40u,
+    EFI_MEMORY_TYPE_OFFSET = 0u,
+    EFI_MEMORY_PHYSICAL_START_OFFSET = 8u,
+    EFI_MEMORY_NUMBER_OF_PAGES_OFFSET = 24u,
+    EFI_ACPI_RECLAIM_MEMORY = 9u
+};
+
+static EFI_UINT32 read_memory_u32_le(const EFI_UINT8 *bytes) {
+    return (EFI_UINT32)bytes[0]
+        | ((EFI_UINT32)bytes[1] << 8u)
+        | ((EFI_UINT32)bytes[2] << 16u)
+        | ((EFI_UINT32)bytes[3] << 24u);
+}
+
+static EFI_UINT64 read_memory_u64_le(const EFI_UINT8 *bytes) {
+    EFI_UINT64 value = 0;
+
+    for (size_t i = 0; i < 8u; i++) {
+        value |= (EFI_UINT64)bytes[i] << (i * 8u);
+    }
+    return value;
+}
+
+/* Return only bytes proven to lie inside the DTB's UEFI reclaim-memory descriptor. */
+static bool find_dtb_available_size(
+    EFI_BOOT_SERVICES *boot_services,
+    EFI_UINT64 dtb_address,
+    size_t *available_out
+) {
+    EFI_UINTN map_size = (EFI_UINTN)sizeof g_memory_map;
+    EFI_UINTN map_key = 0;
+    EFI_UINTN descriptor_size = 0;
+    EFI_UINT32 descriptor_version = 0;
+    EFI_STATUS status = EFI_UNSUPPORTED;
+    const EFI_UINT8 *map = (const EFI_UINT8 *)g_memory_map;
+
+    if (available_out == NULL) {
+        return false;
+    }
+    *available_out = 0u;
+    if (boot_services == NULL || boot_services->GetMemoryMap == NULL ||
+        dtb_address == 0u) {
+        return false;
+    }
+
+    status = boot_services->GetMemoryMap(
+        &map_size,
+        g_memory_map,
+        &map_key,
+        &descriptor_size,
+        &descriptor_version
+    );
+    if (status != EFI_SUCCESS ||
+        map_size > (EFI_UINTN)sizeof g_memory_map ||
+        descriptor_size < (EFI_UINTN)EFI_MEMORY_DESCRIPTOR_MIN_SIZE ||
+        descriptor_size == 0u ||
+        map_size % descriptor_size != 0u) {
+        return false;
+    }
+
+    for (EFI_UINTN offset = 0; offset < map_size; offset += descriptor_size) {
+        const EFI_UINT8 *descriptor = &map[(size_t)offset];
+        EFI_UINT32 type = read_memory_u32_le(
+            &descriptor[EFI_MEMORY_TYPE_OFFSET]
+        );
+        EFI_UINT64 base = read_memory_u64_le(
+            &descriptor[EFI_MEMORY_PHYSICAL_START_OFFSET]
+        );
+        EFI_UINT64 pages = read_memory_u64_le(
+            &descriptor[EFI_MEMORY_NUMBER_OF_PAGES_OFFSET]
+        );
+        EFI_UINT64 span = 0;
+        EFI_UINT64 end = 0;
+        EFI_UINT64 remaining = 0;
+
+        if (type != (EFI_UINT32)EFI_ACPI_RECLAIM_MEMORY || pages == 0u) {
+            continue;
+        }
+        if (pages > (UINT64_MAX - base) / (EFI_UINT64)PAGE_SIZE) {
+            continue;
+        }
+
+        span = pages * (EFI_UINT64)PAGE_SIZE;
+        end = base + span;
+        if (dtb_address < base || dtb_address >= end) {
+            continue;
+        }
+
+        remaining = end - dtb_address;
+        if (remaining > (EFI_UINT64)ASTRA_FDT_MAX_SIZE) {
+            remaining = (EFI_UINT64)ASTRA_FDT_MAX_SIZE;
+        }
+        if (remaining < (EFI_UINT64)ASTRA_FDT_HEADER_SIZE) {
+            return false;
+        }
+        *available_out = (size_t)remaining;
+        return true;
+    }
+
+    return false;
+}
+
 /* The firmware owns the DTB memory; the kernel borrows it after ExitBootServices. */
 static void capture_device_tree(
     EFI_SYSTEM_TABLE *system_table,
@@ -424,6 +527,7 @@ static void capture_device_tree(
     EFI_CONFIGURATION_TABLE *tables = NULL;
     AstraFdtView view;
     AstraFdtResult result = ASTRA_FDT_OK;
+    size_t available = 0u;
 
     if (boot_info == NULL) {
         return;
@@ -446,11 +550,15 @@ static void capture_device_tree(
             return;
         }
 
-        result = astra_fdt_open(
-            tables[i].VendorTable,
-            (size_t)ASTRA_FDT_MAX_SIZE,
-            &view
-        );
+        if (!find_dtb_available_size(
+                system_table->BootServices,
+                (EFI_UINT64)(uintptr_t)tables[i].VendorTable,
+                &available)) {
+            loader_out(L"Warning: device tree is outside reclaimable firmware memory.\r\n");
+            return;
+        }
+
+        result = astra_fdt_open(tables[i].VendorTable, available, &view);
         if (result != ASTRA_FDT_OK) {
             loader_out(L"Warning: firmware device tree failed validation.\r\n");
             return;
