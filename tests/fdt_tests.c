@@ -63,6 +63,96 @@ static size_t make_valid_blob(uint8_t *blob, size_t capacity) {
     return total;
 }
 
+static size_t make_nested_blob(uint8_t *blob, size_t capacity) {
+    static const uint8_t model[] = "Astra Test";
+    static const uint8_t child_name[] = "chosen";
+    static const uint8_t stdout_path[] = "serial0:115200n8";
+    static const uint8_t strings[] = "model\0stdout-path\0";
+    enum {
+        NESTED_TOTAL_SIZE = 162u,
+        NESTED_STRUCTURE_OFFSET = 56u,
+        NESTED_STRUCTURE_SIZE = 88u,
+        NESTED_STRINGS_OFFSET = 144u
+    };
+
+    if (blob == NULL || capacity < (size_t)NESTED_TOTAL_SIZE) {
+        return 0u;
+    }
+    (void)memset(blob, 0, (size_t)NESTED_TOTAL_SIZE);
+    write_be32(&blob[0], ASTRA_FDT_MAGIC);
+    write_be32(&blob[4], (uint32_t)NESTED_TOTAL_SIZE);
+    write_be32(&blob[8], (uint32_t)NESTED_STRUCTURE_OFFSET);
+    write_be32(&blob[12], (uint32_t)NESTED_STRINGS_OFFSET);
+    write_be32(&blob[16], (uint32_t)TEST_FDT_RESERVE_OFFSET);
+    write_be32(&blob[20], 17u);
+    write_be32(&blob[24], 16u);
+    write_be32(&blob[28], 0u);
+    write_be32(&blob[32], (uint32_t)(sizeof strings - 1u));
+    write_be32(&blob[36], (uint32_t)NESTED_STRUCTURE_SIZE);
+
+    write_be32(&blob[56], 1u);
+    blob[60] = 0u;
+    write_be32(&blob[64], 3u);
+    write_be32(&blob[68], (uint32_t)sizeof model);
+    write_be32(&blob[72], 0u);
+    (void)memcpy(&blob[76], model, sizeof model);
+
+    write_be32(&blob[88], 1u);
+    (void)memcpy(&blob[92], child_name, sizeof child_name);
+    write_be32(&blob[100], 3u);
+    write_be32(&blob[104], (uint32_t)sizeof stdout_path);
+    write_be32(&blob[108], 6u);
+    (void)memcpy(&blob[112], stdout_path, sizeof stdout_path);
+    write_be32(&blob[132], 2u);
+    write_be32(&blob[136], 2u);
+    write_be32(&blob[140], 9u);
+    (void)memcpy(&blob[NESTED_STRINGS_OFFSET], strings, sizeof strings - 1u);
+    return (size_t)NESTED_TOTAL_SIZE;
+}
+
+static void test_nested_node_property(void) {
+    uint8_t blob[256] = {0};
+    AstraFdtView view = {0};
+    const uint8_t *value = NULL;
+    size_t value_length = 0u;
+    size_t blob_size = make_nested_blob(blob, sizeof blob);
+
+    CHECK(blob_size != 0u);
+    CHECK(astra_fdt_open(blob, blob_size, &view) == ASTRA_FDT_OK);
+    CHECK(astra_fdt_node_property(
+        &view, "/chosen", sizeof "/chosen" - 1u,
+        "stdout-path", sizeof "stdout-path" - 1u,
+        &value, &value_length
+    ) == ASTRA_FDT_OK);
+    CHECK(value != NULL);
+    CHECK(value_length == sizeof "serial0:115200n8");
+    CHECK(memcmp(value, "serial0:115200n8", sizeof "serial0:115200n8") == 0);
+
+    CHECK(astra_fdt_node_property(
+        &view, "/missing", sizeof "/missing" - 1u,
+        "stdout-path", sizeof "stdout-path" - 1u,
+        &value, &value_length
+    ) == ASTRA_FDT_PROPERTY_NOT_FOUND);
+    CHECK(value == NULL);
+    CHECK(value_length == 0u);
+
+    CHECK(astra_fdt_node_property(
+        &view, "chosen", sizeof "chosen" - 1u,
+        "stdout-path", sizeof "stdout-path" - 1u,
+        &value, &value_length
+    ) == ASTRA_FDT_INVALID_ARGUMENT);
+    CHECK(astra_fdt_node_property(
+        &view, "/chosen/", sizeof "/chosen/" - 1u,
+        "stdout-path", sizeof "stdout-path" - 1u,
+        &value, &value_length
+    ) == ASTRA_FDT_INVALID_ARGUMENT);
+    CHECK(astra_fdt_node_property(
+        &view, "/chosen", sizeof "/chosen" - 1u,
+        "stdout-path", sizeof "stdout-path" - 1u,
+        NULL, &value_length
+    ) == ASTRA_FDT_INVALID_ARGUMENT);
+}
+
 static void test_valid_header_and_root_property(void) {
     uint8_t blob[256] = {0};
     AstraFdtView view = {0};
@@ -165,6 +255,7 @@ static void test_invalid_structure_and_arguments(void) {
 }
 
 int main(void) {
+    test_nested_node_property();
     test_valid_header_and_root_property();
     test_short_and_invalid_headers();
     test_block_ranges_and_reserve_map();
