@@ -176,6 +176,8 @@ static EFI_UINT8 g_kernel_staging[KERNEL_STAGING_CAP];
 static EFI_UINT64 g_memory_map[MEMORY_MAP_WORDS];
 static AstraBootInfo g_boot_info;
 static EFI_STATUS g_output_error = EFI_SUCCESS;
+static EFI_SIMPLE_TEXT_OUTPUT_PROTOCOL *g_active_console = NULL;
+static bool g_boot_services_exited = false;
 
 static void loader_out(const CHAR16 *text) {
     enum { OUTPUT_CHUNK_CAP = 128 };
@@ -186,10 +188,7 @@ static void loader_out(const CHAR16 *text) {
     if (text == NULL || g_output_error != EFI_SUCCESS) {
         return;
     }
-    if (g_boot_info.magic == ASTRA_BOOT_INFO_MAGIC &&
-        g_boot_info.version == ASTRA_BOOT_INFO_VERSION) {
-        /* Boot services are already gone; do not touch the console after handoff. */
-        g_output_error = EFI_UNSUPPORTED;
+    if (g_boot_services_exited) {
         return;
     }
 
@@ -203,7 +202,6 @@ static void loader_out(const CHAR16 *text) {
         chunk[count] = 0;
         if (g_output_error == EFI_SUCCESS) {
             /* The active text protocol is set immediately before the first output. */
-            extern EFI_SIMPLE_TEXT_OUTPUT_PROTOCOL *g_active_console;
             if (g_active_console == NULL || g_active_console->OutputString == NULL) {
                 g_output_error = EFI_INVALID_PARAMETER;
                 return;
@@ -216,8 +214,6 @@ static void loader_out(const CHAR16 *text) {
         }
     }
 }
-
-EFI_SIMPLE_TEXT_OUTPUT_PROTOCOL *g_active_console = NULL;
 
 static EFI_STATUS read_kernel(
     EFI_HANDLE image,
@@ -318,13 +314,13 @@ static EFI_STATUS read_kernel(
     }
 
 cleanup:
-    if (file != NULL) {
+    if (file != NULL && file->Close != NULL) {
         close_status = file->Close(file);
         if (status == EFI_SUCCESS && close_status != EFI_SUCCESS) {
             status = close_status;
         }
     }
-    if (root != NULL) {
+    if (root != NULL && root->Close != NULL) {
         close_status = root->Close(root);
         if (status == EFI_SUCCESS && close_status != EFI_SUCCESS) {
             status = close_status;
@@ -442,6 +438,7 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *system_table) {
         /* A failed ExitBootServices can leave firmware partly shut down. */
         stop_forever();
     }
+    g_boot_services_exited = true;
 
     /* No UEFI protocol or boot-service call is made after this point. */
     {
