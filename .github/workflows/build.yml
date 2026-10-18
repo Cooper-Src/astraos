@@ -47,14 +47,17 @@ jobs:
       - name: Build ARM64 UEFI application and ISO
         run: bash ./scripts/build.sh
 
-      - name: Inspect firmware application
+      - name: Inspect firmware application and kernel
         run: |
           file build/EFI/BOOT/BOOTAA64.EFI
+          file build/kernel.elf
+          nm -u build/kernel.elf
           xorriso -indev build/astraos-aarch64.iso -report_el_torito as_mkisofs
           test -s build/astraos-aarch64.iso
           test -s build/astraos-aarch64-esp.img
+          test -s build/kernel.bin
 
-      - name: Smoke-test UEFI boot in QEMU
+      - name: Smoke-test UEFI boot and kernel shell in QEMU
         shell: bash
         run: |
           set -euo pipefail
@@ -104,65 +107,8 @@ jobs:
             exit 1
           fi
           echo "AstraOS kernel startup, interactive shell, and VFS smoke tests verified."
-      - name: Upload ISO and checksums
-        uses: actions/upload-artifact@v4
-        with:
-          name: astraos-aarch64-live
-          path: |
-            build/astraos-aarch64.iso
-            build/astraos-aarch64-esp.img
-            build/SHA256SUMS
-            build/kernel.elf
-            build/kernel.bin
-          if-no-files-found: error
-          retention-days: 30
 
-      - name: Publish rolling prerelease assets
-        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh release view rolling --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 || \
-            gh release create rolling --repo "$GITHUB_REPOSITORY" \
-              --title "AstraOS ARM64 Live (latest CI build)" \
-              --notes "Automatically built development image. Not a stable release." \
-              --prerelease
-          gh release upload rolling \
-            build/astraos-aarch64.iso build/astraos-aarch64-esp.img \
-            build/kernel.elf build/kernel.bin build/SHA256SUMS \
-            --repo "$GITHUB_REPOSITORY" --clobber
-help\rwhoami\rmkdir /tmp/ci\rwrite /tmp/ci/probe kernel-vfs-ok\rcat /tmp/ci/probe\r'
-            for ((i = 0; i < ${#commands}; i++)); do
-              printf '%s' "${commands:i:1}"
-              sleep 0.01
-            done
-            sleep 2
-          } | timeout 35s qemu-system-aarch64 \
-            -machine virt -cpu cortex-a72 -m 1024 \
-            -drive if=pflash,format=raw,unit=0,readonly=on,file="$CODE" \
-            -drive if=pflash,format=raw,unit=1,file=build/uefi-vars.fd \
-            -cdrom build/astraos-aarch64.iso -boot order=d \
-            -display none -serial stdio -monitor none \
-            > build/qemu-boot.log 2>&1
-          QEMU_STATUS=$?
-          set -e
-          cat build/qemu-boot.log
-          # The interactive live shell intentionally keeps running. Timeout is expected.
-          if ! grep -q "AstraOS kernel 0.2" build/qemu-boot.log; then
-            echo "AstraOS kernel startup marker not found in QEMU console log (exit $QEMU_STATUS)." >&2
-            exit 1
-          fi
-          if ! grep -q "root@astra:/#" build/qemu-boot.log; then
-            echo "Kernel did not reach the interactive root prompt." >&2
-            exit 1
-          fi
-          if ! grep -q "kernel-vfs-ok" build/qemu-boot.log; then
-            echo "Kernel shell did not complete create/write/read regression commands." >&2
-            exit 1
-          fi
-          echo "AstraOS kernel startup, interactive shell, and VFS smoke tests verified."
-
-      - name: Upload ISO and checksums
+      - name: Upload ISO and kernel artifacts
         uses: actions/upload-artifact@v4
         with:
           name: astraos-aarch64-live
