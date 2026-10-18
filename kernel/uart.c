@@ -64,23 +64,27 @@ uint8_t astra_uart_get_byte(void) {
     return (uint8_t)(g_uart[UART_DATA] & 0xffu);
 }
 
-void astra_uart_put_u32(uint32_t value) {
-    char digits[10];
+void astra_uart_put_u64(uint64_t value) {
+    char digits[20];
     size_t count = 0;
 
     if (value == 0) {
         astra_uart_put_byte((uint8_t)'0');
         return;
     }
-    while (value > 0) {
-        digits[count] = (char)('0' + (value % 10u));
+    while (value > 0 && count < sizeof digits) {
+        digits[count] = (char)('0' + (value % UINT64_C(10)));
         count++;
-        value /= 10u;
+        value /= UINT64_C(10);
     }
     while (count > 0) {
         count--;
         astra_uart_put_byte((uint8_t)digits[count]);
     }
+}
+
+void astra_uart_put_u32(uint32_t value) {
+    astra_uart_put_u64((uint64_t)value);
 }
 
 void astra_uart_put_hex(uint64_t value) {

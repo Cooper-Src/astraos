@@ -1,4 +1,5 @@
 #include "boot_info.h"
+#include "memory.h"
 #include "uart.h"
 #include "vfs.h"
 
@@ -9,6 +10,8 @@
 enum { KERNEL_LINE_CAP = 256 };
 
 static AstraVfs g_vfs;
+static AstraMemory g_memory;
+static bool g_memory_ready = false;
 
 static size_t text_length(const char *text) {
     size_t length = 0;
@@ -130,6 +133,44 @@ static bool parse_command(
     line[args_end] = '\0';
     *args_out = &line[args_start];
     *args_len_out = args_end - args_start;
+    return true;
+}
+
+static bool parse_hex_u64(const char *text, size_t text_len, uint64_t *value_out) {
+    size_t position = 0;
+    uint64_t value = 0;
+
+    if (text == NULL || value_out == NULL || text_len == 0) {
+        return false;
+    }
+    if (text_len >= 2u && text[0] == '0' &&
+        (text[1] == 'x' || text[1] == 'X')) {
+        position = 2u;
+    }
+    if (position == text_len) {
+        return false;
+    }
+
+    for (; position < text_len; position++) {
+        uint64_t digit = 0;
+        char character = text[position];
+
+        if (character >= '0' && character <= '9') {
+            digit = (uint64_t)(character - '0');
+        } else if (character >= 'a' && character <= 'f') {
+            digit = (uint64_t)(character - 'a') + 10u;
+        } else if (character >= 'A' && character <= 'F') {
+            digit = (uint64_t)(character - 'A') + 10u;
+        } else {
+            return false;
+        }
+        if (value > (UINT64_MAX - digit) / UINT64_C(16)) {
+            return false;
+        }
+        value = (value * UINT64_C(16)) + digit;
+    }
+
+    *value_out = value;
     return true;
 }
 
@@ -255,7 +296,8 @@ static void command_dispatch(const char *command, size_t command_len,
     if (token_equals(command, command_len, "help")) {
         astra_uart_puts(
             "AstraOS kernel commands:\n"
-            "  help, about, uname, mem, clear, halt\n"
+            "  help, about, uname, mem, palloc, pfree HEX_ADDRESS\n"
+            "  clear, halt\n"
             "  pwd, ls [PATH], cd PATH, cat PATH\n"
             "  touch PATH, mkdir PATH, write PATH TEXT, rm PATH\n"
             "  chmod OCTAL PATH, whoami, id, su astra\n"
@@ -270,19 +312,86 @@ static void command_dispatch(const char *command, size_t command_len,
     } else if (token_equals(command, command_len, "uname")) {
         astra_uart_puts("AstraOS astra-aarch64 0.2 kernel\n");
     } else if (token_equals(command, command_len, "mem")) {
-        if (boot_info == NULL) {
+        AstraMemoryStats stats = {0};
+        AstraMemoryResult memory_result = ASTRA_MEMORY_OK;
+
+        if (boot_info == NULL || boot_info->magic != ASTRA_BOOT_INFO_MAGIC ||
+            boot_info->version != ASTRA_BOOT_INFO_VERSION) {
             astra_uart_puts("boot information unavailable\n");
             return;
         }
         astra_uart_puts("kernel base: ");
         astra_uart_put_hex(boot_info->kernel_base);
         astra_uart_puts("\nimage bytes: ");
-        astra_uart_put_u32((uint32_t)boot_info->kernel_image_size);
+        astra_uart_put_u64(boot_info->kernel_image_size);
         astra_uart_puts("\nUEFI map bytes: ");
-        astra_uart_put_u32((uint32_t)boot_info->memory_map_size);
+        astra_uart_put_u64(boot_info->memory_map_size);
         astra_uart_puts("\ndescriptor bytes: ");
-        astra_uart_put_u32((uint32_t)boot_info->memory_descriptor_size);
+        astra_uart_put_u64(boot_info->memory_descriptor_size);
         astra_uart_puts("\n");
+
+        if (!g_memory_ready) {
+            astra_uart_puts("physical page allocator: unavailable\n");
+            return;
+        }
+        memory_result = astra_memory_get_stats(&g_memory, &stats);
+        if (memory_result != ASTRA_MEMORY_OK) {
+            astra_uart_puts("error: ");
+            astra_uart_puts(astra_memory_result_name(memory_result));
+            astra_uart_puts("\n");
+            return;
+        }
+        astra_uart_puts("memory descriptors: ");
+        astra_uart_put_u64(stats.descriptor_count);
+        astra_uart_puts("\nmanaged pages below 4 GiB: ");
+        astra_uart_put_u64(stats.managed_pages);
+        astra_uart_puts("\nfree pages: ");
+        astra_uart_put_u64(stats.free_pages);
+        astra_uart_puts("\nignored pages above 4 GiB: ");
+        astra_uart_put_u64(stats.ignored_pages);
+        astra_uart_puts("\n");
+    } else if (token_equals(command, command_len, "palloc")) {
+        uint64_t address = 0;
+        AstraMemoryResult memory_result = ASTRA_MEMORY_OK;
+
+        if (args_len != 0) {
+            astra_uart_puts("usage: palloc\n");
+            return;
+        }
+        if (!g_memory_ready) {
+            astra_uart_puts("error: physical page allocator unavailable\n");
+            return;
+        }
+        memory_result = astra_memory_alloc_page(&g_memory, &address);
+        if (memory_result != ASTRA_MEMORY_OK) {
+            astra_uart_puts("error: ");
+            astra_uart_puts(astra_memory_result_name(memory_result));
+            astra_uart_puts("\n");
+            return;
+        }
+        astra_uart_puts("allocated physical page at ");
+        astra_uart_put_hex(address);
+        astra_uart_puts("\n");
+    } else if (token_equals(command, command_len, "pfree")) {
+        uint64_t address = 0;
+        AstraMemoryResult memory_result = ASTRA_MEMORY_OK;
+
+        if (!parse_hex_u64(args, args_len, &address)) {
+            astra_uart_puts("usage: pfree HEX_ADDRESS (example: pfree 0x40001000)\n");
+            return;
+        }
+        if (!g_memory_ready) {
+            astra_uart_puts("error: physical page allocator unavailable\n");
+            return;
+        }
+        memory_result = astra_memory_free_page(&g_memory, address);
+        if (memory_result != ASTRA_MEMORY_OK) {
+            astra_uart_puts("error: ");
+            astra_uart_puts(astra_memory_result_name(memory_result));
+            astra_uart_puts("\n");
+            return;
+        }
+        astra_uart_puts("physical page returned to allocator\n");
     } else if (token_equals(command, command_len, "clear")) {
         astra_uart_puts("\x1b[2J\x1b[H");
     } else if (token_equals(command, command_len, "halt")) {
@@ -409,12 +518,27 @@ void astra_kernel_main(const AstraBootInfo *boot_info) {
     astra_uart_puts("          ASTRAOS KERNEL\n");
     astra_uart_puts("================================\n");
     astra_uart_puts("AstraOS kernel 0.2 | AArch64 freestanding\n");
-    if (boot_info != NULL && boot_info->magic == ASTRA_BOOT_INFO_MAGIC) {
+    if (boot_info != NULL && boot_info->magic == ASTRA_BOOT_INFO_MAGIC &&
+        boot_info->version == ASTRA_BOOT_INFO_VERSION) {
+        AstraMemoryResult memory_result = ASTRA_MEMORY_OK;
+
         astra_uart_puts("UEFI boot-services handoff completed.\n");
         astra_uart_puts("Kernel base: ");
         astra_uart_put_hex(boot_info->kernel_base);
         astra_uart_puts("\n");
+
+        memory_result = astra_memory_init(&g_memory, boot_info);
+        if (memory_result == ASTRA_MEMORY_OK) {
+            g_memory_ready = true;
+            astra_uart_puts("Physical page allocator initialized (below 4 GiB).\n");
+        } else {
+            g_memory_ready = false;
+            astra_uart_puts("warning: physical page allocator unavailable: ");
+            astra_uart_puts(astra_memory_result_name(memory_result));
+            astra_uart_puts("\n");
+        }
     } else {
+        g_memory_ready = false;
         astra_uart_puts("warning: boot information did not validate\n");
     }
 

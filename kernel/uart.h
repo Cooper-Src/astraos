@@ -11,6 +11,7 @@ void astra_uart_puts(const char *text);
 void astra_uart_put_byte(uint8_t value);
 uint8_t astra_uart_get_byte(void);
 void astra_uart_put_u32(uint32_t value);
+void astra_uart_put_u64(uint64_t value);
 void astra_uart_put_hex(uint64_t value);
 
 #endif

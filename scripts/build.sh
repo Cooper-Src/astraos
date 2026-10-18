@@ -76,6 +76,7 @@ KERNEL_FLAGS=(
 
 clang "${KERNEL_FLAGS[@]}" -c "$ROOT/kernel/main.c" -o "$BUILD/objects/kernel_main.o"
 clang "${KERNEL_FLAGS[@]}" -c "$ROOT/kernel/vfs.c" -o "$BUILD/objects/vfs.o"
+clang "${KERNEL_FLAGS[@]}" -c "$ROOT/kernel/memory.c" -o "$BUILD/objects/memory.o"
 clang "${KERNEL_FLAGS[@]}" -c "$ROOT/kernel/uart.c" -o "$BUILD/objects/uart.o"
 clang --target=aarch64-none-elf -ffreestanding -fno-pic -fno-pie \
   -mcpu=cortex-a72 -c "$ROOT/kernel/entry.S" -o "$BUILD/objects/entry.o"
@@ -84,6 +85,7 @@ KERNEL_OBJECTS=(
   "$BUILD/objects/entry.o"
   "$BUILD/objects/kernel_main.o"
   "$BUILD/objects/vfs.o"
+  "$BUILD/objects/memory.o"
   "$BUILD/objects/uart.o"
 )
 

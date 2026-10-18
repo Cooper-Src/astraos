@@ -10,8 +10,8 @@ AstraOS is an experimental from-scratch ARM64 operating-system project. The curr
 - kernel.bin: flat freestanding AArch64 kernel image linked at 0x40200000.
 - kernel.elf: ELF kernel build used for symbol checks and debugging.
 - UEFI loader reads kernel.bin from the FAT ESP, reserves a fixed 2 MiB load region, copies/zeros the kernel memory, captures the UEFI memory map, calls ExitBootServices, and jumps to the kernel entry.
-- Kernel entry installs its own stack and masks interrupts. The kernel currently owns a polling PL011 console, a bounded command loop, and a fixed-size RAM VFS.
-- VFS uses caller-owned/static storage only: no heap and no hosted C runtime. Paths are bounded byte spans, file reads/writes are size-checked, and owner/mode bits plus sticky-directory behavior are covered by sanitizer tests.
+- Kernel entry installs its own stack and masks interrupts. The kernel owns a polling PL011 console, a bounded command loop, a fixed-size RAM VFS, and a UEFI-memory-map-backed physical page allocator.
+- VFS and physical page allocation use static storage only: no heap and no hosted C runtime. The allocator validates UEFI descriptor size/stride, rejects overlapping conventional ranges, tracks managed and free 4 KiB pages with separate bitmaps, excludes physical page zero, and caps allocations below 4 GiB. Sanitizer tests cover allocation/free, double frees, malformed maps, overlap, and ignored high memory.
 
 ## Build
 
@@ -51,6 +51,8 @@ The kernel shell appears on the serial terminal. Commands currently include:
     about
     uname
     mem
+    palloc
+    pfree 0x40001000
     pwd
     ls [PATH]
     cd PATH
@@ -77,7 +79,7 @@ The serial driver is only intended for QEMU virt. Real hardware requires platfor
 
 ## Roadmap
 
-1. Harden the loader/kernel handoff and add a kernel memory-map parser plus physical-page allocator.
+1. Harden the loader/kernel handoff and extend the physical-page allocator beyond its current 4 GiB address cap.
 2. Add an EFI GOP framebuffer console and boot-time graphics metadata so hardware can show kernel output after boot services end.
 3. Add architecture exceptions, interrupt controller/timer setup, then a scheduler and user/kernel isolation.
 4. Implement storage discovery and a persistent on-disk filesystem with tested recovery/error handling.
