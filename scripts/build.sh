@@ -78,6 +78,7 @@ clang "${KERNEL_FLAGS[@]}" -c "$ROOT/kernel/main.c" -o "$BUILD/objects/kernel_ma
 clang "${KERNEL_FLAGS[@]}" -c "$ROOT/kernel/vfs.c" -o "$BUILD/objects/vfs.o"
 clang "${KERNEL_FLAGS[@]}" -c "$ROOT/kernel/memory.c" -o "$BUILD/objects/memory.o"
 clang "${KERNEL_FLAGS[@]}" -c "$ROOT/kernel/uart.c" -o "$BUILD/objects/uart.o"
+clang "${KERNEL_FLAGS[@]}" -c "$ROOT/kernel/framebuffer.c" -o "$BUILD/objects/framebuffer.o"
 clang --target=aarch64-none-elf -ffreestanding -fno-pic -fno-pie \
   -mcpu=cortex-a72 -c "$ROOT/kernel/entry.S" -o "$BUILD/objects/entry.o"
 
@@ -87,6 +88,7 @@ KERNEL_OBJECTS=(
   "$BUILD/objects/vfs.o"
   "$BUILD/objects/memory.o"
   "$BUILD/objects/uart.o"
+  "$BUILD/objects/framebuffer.o"
 )
 
 ld.lld -T "$ROOT/kernel/linker.ld" -o "$BUILD/kernel.elf" "${KERNEL_OBJECTS[@]}"
