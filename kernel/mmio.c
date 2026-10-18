@@ -8,6 +8,7 @@ enum {
     MMIO_EFI_TYPE_OFFSET = 0u,
     MMIO_EFI_PHYSICAL_START_OFFSET = 8u,
     MMIO_EFI_PAGE_COUNT_OFFSET = 24u,
+    MMIO_EFI_RESERVED_MEMORY = 0u,
     MMIO_EFI_MEMORY_MAPPED_IO = 11u,
     MMIO_EFI_PAGE_SIZE = 4096u
 };
@@ -91,7 +92,8 @@ bool astra_mmio_range_is_valid(
             continue;
         }
 
-        if (type != (uint32_t)MMIO_EFI_MEMORY_MAPPED_IO ||
+        if ((type != (uint32_t)MMIO_EFI_MEMORY_MAPPED_IO &&
+             type != (uint32_t)MMIO_EFI_RESERVED_MEMORY) ||
             found ||
             address < base ||
             range_end > descriptor_end) {

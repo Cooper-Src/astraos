@@ -8,7 +8,8 @@
 
 /*
  * Checks that the complete byte span is contained in one EFI_MEMORY_MAPPED_IO
- * descriptor and does not overlap any descriptor of another type.
+ * or EfiReservedMemoryType descriptor and does not overlap any descriptor of
+ * another type. Callers must independently identify the device through FDT/ACPI.
  * This examines metadata only; it does not access the requested MMIO address.
  */
 bool astra_mmio_range_is_valid(
