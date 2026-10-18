@@ -138,7 +138,7 @@ cp "$BUILD/efiboot.img" "$STAGING/efiboot.img"
 cp "$BUILD/kernel.bin" "$STAGING/kernel.bin"
 cp "$ROOT/README.md" "$STAGING/README.md"
 
-echo "[4/5] Create a UEFI-bootable ARM64 ISO"
+echo "[4/6] Create a UEFI-bootable ARM64 ISO"
 (
   cd "$STAGING"
   xorriso -as mkisofs -r -J -V ASTRAOS \
