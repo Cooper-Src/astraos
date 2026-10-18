@@ -58,7 +58,7 @@ static void print_mode(uint16_t mode, bool is_directory) {
     permissions[6] = (mode & 0010u) != 0 ? 'x' : '-';
     permissions[7] = (mode & 0004u) != 0 ? 'r' : '-';
     permissions[8] = (mode & 0002u) != 0 ? 'w' : '-';
-    permissions[9 - 1] = (mode & 0001u) != 0 ? 'x' : '-';
+    permissions[9] = (mode & 0001u) != 0 ? 'x' : '-';
     astra_uart_write(permissions, sizeof permissions);
 }
 
@@ -120,9 +120,9 @@ static bool parse_command(
 
     *command_out = &line[command_start];
     *command_len_out = command_end - command_start;
-    line[command_end] = '\0';
 
     args_start = skip_spaces(line, line_len, command_end);
+    line[command_end] = '\0';
     while (args_end > args_start &&
         (line[args_end - 1u] == ' ' || line[args_end - 1u] == '\t')) {
         args_end--;
