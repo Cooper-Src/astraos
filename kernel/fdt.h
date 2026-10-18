@@ -63,6 +63,21 @@ AstraFdtResult astra_fdt_root_property(
     size_t *value_length_out
 );
 
+/*
+ * Returns a borrowed span for a property on an absolute FDT node path.
+ * Supports the root path "/" and exact node names; aliases and phandles are
+ * intentionally not resolved. The output values are cleared on failure.
+ */
+AstraFdtResult astra_fdt_node_property(
+    const AstraFdtView *view,
+    const char *node_path,
+    size_t node_path_length,
+    const char *name,
+    size_t name_length,
+    const uint8_t **value_out,
+    size_t *value_length_out
+);
+
 const char *astra_fdt_result_name(AstraFdtResult result);
 
 #endif
