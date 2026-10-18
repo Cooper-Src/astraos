@@ -1,5 +1,7 @@
 #include "fdt.h"
 
+#include <stdbool.h>
+
 enum {
     FDT_VERSION_MINIMUM = 17u,
     FDT_VERSION_LAST_COMPATIBLE_MAXIMUM = 17u,
@@ -162,29 +164,6 @@ AstraFdtResult astra_fdt_open(
     view.reserve_map_size = reserve_size;
     *view_out = view;
     return ASTRA_FDT_OK;
-}
-
-static AstraFdtResult get_string_length(
-    const AstraFdtView *view,
-    size_t name_offset,
-    size_t *name_length_out
-) {
-    size_t position = 0;
-
-    if (view == NULL || name_length_out == NULL || name_offset >= view->strings_size) {
-        return ASTRA_FDT_INVALID_STRINGS;
-    }
-    position = view->strings_offset + name_offset;
-    while (name_offset < view->strings_size) {
-        if (view->data[position] == 0u) {
-            *name_length_out = position - (view->strings_offset + name_offset -
-                (position - (view->strings_offset + name_offset)));
-            return ASTRA_FDT_OK;
-        }
-        position++;
-        name_offset++;
-    }
-    return ASTRA_FDT_INVALID_STRINGS;
 }
 
 AstraFdtResult astra_fdt_root_property(
