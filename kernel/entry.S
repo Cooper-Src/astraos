@@ -8,6 +8,9 @@ _start:
     msr daifset, #0xf
     adrp x1, __stack_top
     add x1, x1, :lo12:__stack_top
+    /* Do not rely on inherited firmware SPSel state. */
+    msr SPSel, #1
+    isb
     mov sp, x1
 
     /* The UEFI loader may place the image away from the link address. */

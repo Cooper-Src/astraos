@@ -204,6 +204,10 @@ jobs:
             echo "AstraOS did not report the injected synchronous exception." >&2
             exit 1
           fi
+          if ! grep -q "Vector slot: 4" build/qemu-boot.log; then
+            echo "Exception did not arrive through the current-EL SP_ELx vector." >&2
+            exit 1
+          fi
           if ! grep -q "Exception class: 0x000000000000003c" build/qemu-boot.log; then
             echo "BRK exception class was not reported correctly." >&2
             exit 1
