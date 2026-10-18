@@ -55,6 +55,17 @@ jobs:
             kernel/memory.c tests/memory_tests.c -o /tmp/astraos-memory-tests
           UBSAN_OPTIONS=print_stacktrace=1 /tmp/astraos-memory-tests
 
+      - name: Run GOP framebuffer sanitizer tests
+        run: |
+          clang -std=c17 -g -O0 \
+            -Wall -Wextra -Wpedantic -Wshadow -Wconversion -Wformat=2 \
+            -Wstrict-prototypes -Wmissing-prototypes -Wwrite-strings \
+            -Wcast-qual -Wundef -Wvla -Werror \
+            -fsanitize=address,undefined -fno-sanitize-recover=undefined \
+            -fno-omit-frame-pointer -Ikernel \
+            kernel/framebuffer.c tests/framebuffer_tests.c -o /tmp/astraos-framebuffer-tests
+          UBSAN_OPTIONS=print_stacktrace=1 /tmp/astraos-framebuffer-tests
+
       - name: Build ARM64 UEFI application and ISO
         run: bash ./scripts/build.sh
 
