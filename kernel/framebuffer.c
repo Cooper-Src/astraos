@@ -216,6 +216,16 @@ static uint32_t mask_component(uint8_t value, uint32_t mask) {
     return (uint32_t)((scaled << shift) & (uint64_t)mask);
 }
 
+static bool mask_is_contiguous(uint32_t mask) {
+    if (mask == 0u) {
+        return false;
+    }
+    while ((mask & 1u) == 0u) {
+        mask >>= 1u;
+    }
+    return (mask & (mask + 1u)) == 0u;
+}
+
 static uint32_t color_pixel(uint8_t red, uint8_t green, uint8_t blue) {
     const uint8_t reserved = 255u;
 
@@ -445,7 +455,9 @@ void astra_framebuffer_init(const AstraBootInfo *boot_info) {
         return;
     }
     required_bytes = pixel_count * sizeof(uint32_t);
-    if (required_bytes > boot_info->framebuffer_size) {
+    if (required_bytes > boot_info->framebuffer_size ||
+        boot_info->framebuffer_base > UINT64_MAX - required_bytes ||
+        required_bytes > (uint64_t)UINTPTR_MAX - boot_info->framebuffer_base) {
         return;
     }
 
@@ -455,6 +467,11 @@ void astra_framebuffer_init(const AstraBootInfo *boot_info) {
             boot_info->framebuffer_blue_mask |
             boot_info->framebuffer_reserved_mask;
         if (combined_mask == 0u ||
+            !mask_is_contiguous(boot_info->framebuffer_red_mask) ||
+            !mask_is_contiguous(boot_info->framebuffer_green_mask) ||
+            !mask_is_contiguous(boot_info->framebuffer_blue_mask) ||
+            (boot_info->framebuffer_reserved_mask != 0u &&
+                !mask_is_contiguous(boot_info->framebuffer_reserved_mask)) ||
             (boot_info->framebuffer_red_mask & boot_info->framebuffer_green_mask) != 0u ||
             (boot_info->framebuffer_red_mask & boot_info->framebuffer_blue_mask) != 0u ||
             (boot_info->framebuffer_red_mask & boot_info->framebuffer_reserved_mask) != 0u ||
