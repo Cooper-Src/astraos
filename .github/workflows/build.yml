@@ -36,8 +36,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          CODE="$(find /usr/share -type f \( -name 'AAVMF_CODE.fd' -o -name 'QEMU_EFI.fd' \) -print -quit)"
-          VARS_TEMPLATE="$(find /usr/share -type f \( -name 'AAVMF_VARS.fd' -o -name 'QEMU_VARS.fd' \) -print -quit)"
+          CODE="$(find /usr/share -type f -name 'AAVMF_CODE.fd' -print -quit)"
+          VARS_TEMPLATE="$(find /usr/share -type f -name 'AAVMF_VARS.fd' -print -quit)"
           if [[ -z "$CODE" || -z "$VARS_TEMPLATE" ]]; then
             echo "Could not find AArch64 UEFI firmware package files." >&2
             exit 1
@@ -46,8 +46,8 @@ jobs:
           set +e
           timeout 35s qemu-system-aarch64 \
             -machine virt -cpu cortex-a72 -m 1024 \
-            -drive if=pflash,format=raw,readonly=on,file="$CODE" \
-            -drive if=pflash,format=raw,file=build/uefi-vars.fd \
+            -drive if=pflash,format=raw,unit=0,readonly=on,file="$CODE" \
+            -drive if=pflash,format=raw,unit=1,file=build/uefi-vars.fd \
             -cdrom build/astraos-aarch64.iso -boot order=d \
             -display none -serial stdio -monitor none \
             > build/qemu-boot.log 2>&1
