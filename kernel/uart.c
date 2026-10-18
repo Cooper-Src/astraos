@@ -1,5 +1,6 @@
 #include "uart.h"
 
+#include "acpi.h"
 #include "framebuffer.h"
 #include "platform.h"
 
