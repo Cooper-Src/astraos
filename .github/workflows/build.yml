@@ -83,7 +83,7 @@ jobs:
           {
             # Wait for the kernel prompt, then inject commands slowly enough for a UART FIFO.
             sleep 8
-            commands='help|whoami|mkdir /tmp/ci|write /tmp/ci/probe kernel-vfs-ok|cat /tmp/ci/probe|'
+            commands='help|whoami|mkdir /tmp/ci|touch /tmp/ci/probe|write /tmp/ci/probe kernel-vfs-ok|cat /tmp/ci/probe|'
             for ((i = 0; i < ${#commands}; i++)); do
               char="${commands:i:1}"
               if [[ "$char" == "|" ]]; then
