@@ -54,6 +54,102 @@ static bool add_u64(uint64_t left, uint64_t right, uint64_t *sum_out) {
     return true;
 }
 
+/*
+ * Validates one UEFI descriptor's half-open physical range.
+ * Empty descriptors carry no address span; non-empty spans must be page-aligned
+ * and have a representable end address.
+ */
+static bool memory_descriptor_range(
+    const uint8_t *descriptor,
+    uint64_t *start_out,
+    uint64_t *end_out,
+    bool *empty_out
+) {
+    uint64_t physical_start = 0u;
+    uint64_t page_count = 0u;
+
+    if (descriptor == NULL || start_out == NULL || end_out == NULL ||
+        empty_out == NULL) {
+        return false;
+    }
+
+    physical_start = read_u64_le(
+        &descriptor[EFI_MEMORY_PHYSICAL_START_OFFSET]
+    );
+    page_count = read_u64_le(
+        &descriptor[EFI_MEMORY_NUMBER_OF_PAGES_OFFSET]
+    );
+    *start_out = physical_start;
+    *end_out = physical_start;
+    *empty_out = page_count == 0u;
+
+    if (page_count == 0u) {
+        return true;
+    }
+    if ((physical_start % ASTRA_MEMORY_PAGE_SIZE) != 0u ||
+        page_count > (UINT64_MAX - physical_start) / ASTRA_MEMORY_PAGE_SIZE) {
+        return false;
+    }
+
+    *end_out = physical_start + page_count * ASTRA_MEMORY_PAGE_SIZE;
+    return true;
+}
+
+/*
+ * UEFI descriptors must not claim overlapping physical spans, even when one
+ * descriptor is reserved/MMIO and lies above the allocator's managed range.
+ * The map-size cap bounds this pairwise validation to a few thousand entries.
+ */
+static bool memory_map_is_nonoverlapping(
+    const uint8_t *map,
+    size_t map_size,
+    size_t descriptor_size
+) {
+    if (map == NULL || descriptor_size < (size_t)EFI_MEMORY_DESCRIPTOR_MIN_SIZE ||
+        descriptor_size > map_size || map_size % descriptor_size != 0u) {
+        return false;
+    }
+
+    for (size_t offset = 0u; offset < map_size; offset += descriptor_size) {
+        const uint8_t *left = &map[offset];
+        uint64_t left_start = 0u;
+        uint64_t left_end = 0u;
+        bool left_empty = false;
+
+        if (!memory_descriptor_range(
+            left, &left_start, &left_end, &left_empty
+        )) {
+            return false;
+        }
+        if (left_empty) {
+            continue;
+        }
+
+        for (size_t other_offset = offset + descriptor_size;
+            other_offset < map_size;
+            other_offset += descriptor_size) {
+            const uint8_t *right = &map[other_offset];
+            uint64_t right_start = 0u;
+            uint64_t right_end = 0u;
+            bool right_empty = false;
+
+            if (!memory_descriptor_range(
+                right, &right_start, &right_end, &right_empty
+            )) {
+                return false;
+            }
+            if (right_empty) {
+                continue;
+            }
+            if (left_start < right_end && right_start < left_end) {
+                return false;
+            }
+        }
+    }
+
+    return true;
+}
+
 static void clear_allocator(AstraMemory *memory) {
     for (size_t i = 0; i < ASTRA_MEMORY_BITMAP_BYTES; i++) {
         memory->managed_bitmap[i] = 0;
@@ -95,6 +191,9 @@ AstraMemoryResult astra_memory_init(AstraMemory *memory, const AstraBootInfo *bo
     map = (const uint8_t *)boot_info->memory_map;
     map_size = (size_t)boot_info->memory_map_size;
     descriptor_size = (size_t)boot_info->memory_descriptor_size;
+    if (!memory_map_is_nonoverlapping(map, map_size, descriptor_size)) {
+        return ASTRA_MEMORY_INVALID_MAP;
+    }
     memory->stats.descriptor_count =
         boot_info->memory_map_size / boot_info->memory_descriptor_size;
 

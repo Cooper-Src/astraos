@@ -165,6 +165,32 @@ static void test_invalid_maps_are_rejected(void) {
     CHECK(astra_memory_init(&g_memory, &info) == ASTRA_MEMORY_INVALID_BOOT_INFO);
 }
 
+static void test_overlaps_between_different_descriptor_types_are_rejected(void) {
+    AstraBootInfo info = {0};
+
+    zero_test_map();
+    set_descriptor(
+        0u, TEST_DESCRIPTOR_BYTES, 7u, UINT64_C(0x40000000), 4u
+    );
+    set_descriptor(
+        1u, TEST_DESCRIPTOR_BYTES, 0u, UINT64_C(0x40002000), 1u
+    );
+    info = make_boot_info(2u * TEST_DESCRIPTOR_BYTES, TEST_DESCRIPTOR_BYTES);
+    CHECK(astra_memory_init(&g_memory, &info) == ASTRA_MEMORY_INVALID_MAP);
+    CHECK(!g_memory.initialized);
+
+    zero_test_map();
+    set_descriptor(
+        0u, TEST_DESCRIPTOR_BYTES, 7u, UINT64_C(0x100000000), 4u
+    );
+    set_descriptor(
+        1u, TEST_DESCRIPTOR_BYTES, 0u, UINT64_C(0x100002000), 1u
+    );
+    info = make_boot_info(2u * TEST_DESCRIPTOR_BYTES, TEST_DESCRIPTOR_BYTES);
+    CHECK(astra_memory_init(&g_memory, &info) == ASTRA_MEMORY_INVALID_MAP);
+    CHECK(!g_memory.initialized);
+}
+
 static void test_invalid_arguments_and_descriptor_overflow(void) {
     AstraBootInfo info = {0};
 
@@ -183,6 +209,7 @@ int main(void) {
     test_allocate_free_and_stats();
     test_high_memory_is_reported_but_not_allocated();
     test_invalid_maps_are_rejected();
+    test_overlaps_between_different_descriptor_types_are_rejected();
     test_invalid_arguments_and_descriptor_overflow();
 
     if (g_failures != 0) {
