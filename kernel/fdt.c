@@ -68,6 +68,116 @@ static bool bytes_equal_text(
     return true;
 }
 
+static AstraFdtResult validate_structure_block(
+    const uint8_t *data,
+    size_t total_size,
+    size_t structure_offset,
+    size_t structure_size,
+    size_t strings_offset,
+    size_t strings_size
+) {
+    size_t position = structure_offset;
+    size_t structure_end = structure_offset + structure_size;
+    size_t depth = 0u;
+    bool root_started = false;
+    bool root_closed = false;
+    bool saw_end = false;
+
+    if (data == NULL ||
+        !range_inside(total_size, structure_offset, structure_size) ||
+        !range_inside(total_size, strings_offset, strings_size)) {
+        return ASTRA_FDT_INVALID_BLOCK;
+    }
+
+    while (position < structure_end) {
+        uint32_t token = 0u;
+
+        if (!range_inside(structure_end, position, (size_t)FDT_TOKEN_SIZE)) {
+            return ASTRA_FDT_INVALID_STRUCTURE;
+        }
+        token = read_be32(&data[position]);
+        position += (size_t)FDT_TOKEN_SIZE;
+
+        if (token == (uint32_t)FDT_TOKEN_BEGIN_NODE) {
+            if (root_closed || (depth == 0u && root_started)) {
+                return ASTRA_FDT_INVALID_STRUCTURE;
+            }
+            if (!root_started) {
+                if (position >= structure_end || data[position] != 0u) {
+                    return ASTRA_FDT_INVALID_STRUCTURE;
+                }
+                root_started = true;
+            }
+
+            while (position < structure_end && data[position] != 0u) {
+                position++;
+            }
+            if (position >= structure_end) {
+                return ASTRA_FDT_INVALID_STRUCTURE;
+            }
+            position++;
+            if (!align4(position, &position) || position > structure_end) {
+                return ASTRA_FDT_INVALID_STRUCTURE;
+            }
+            depth++;
+        } else if (token == (uint32_t)FDT_TOKEN_END_NODE) {
+            if (depth == 0u) {
+                return ASTRA_FDT_INVALID_STRUCTURE;
+            }
+            depth--;
+            if (depth == 0u) {
+                root_closed = true;
+            }
+        } else if (token == (uint32_t)FDT_TOKEN_PROPERTY) {
+            size_t value_length = 0u;
+            size_t name_offset = 0u;
+            size_t name_length = 0u;
+            size_t name_start = 0u;
+
+            if (!root_started || root_closed || depth == 0u ||
+                !range_inside(structure_end, position, 8u)) {
+                return ASTRA_FDT_INVALID_STRUCTURE;
+            }
+            value_length = (size_t)read_be32(&data[position]);
+            name_offset = (size_t)read_be32(&data[position + 4u]);
+            position += 8u;
+
+            if (!range_inside(structure_end, position, value_length)) {
+                return ASTRA_FDT_INVALID_STRUCTURE;
+            }
+            position += value_length;
+            if (!align4(position, &position) || position > structure_end) {
+                return ASTRA_FDT_INVALID_STRUCTURE;
+            }
+            if (name_offset >= strings_size) {
+                return ASTRA_FDT_INVALID_STRINGS;
+            }
+
+            name_start = strings_offset + name_offset;
+            while (name_length < strings_size - name_offset &&
+                data[name_start + name_length] != 0u) {
+                name_length++;
+            }
+            if (name_length == 0u || name_length >= strings_size - name_offset) {
+                return ASTRA_FDT_INVALID_STRINGS;
+            }
+        } else if (token == (uint32_t)FDT_TOKEN_NOP) {
+            continue;
+        } else if (token == (uint32_t)FDT_TOKEN_END) {
+            if (!root_started || !root_closed || depth != 0u ||
+                position != structure_end) {
+                return ASTRA_FDT_INVALID_STRUCTURE;
+            }
+            saw_end = true;
+            break;
+        } else {
+            return ASTRA_FDT_INVALID_STRUCTURE;
+        }
+    }
+
+    return saw_end ? ASTRA_FDT_OK : ASTRA_FDT_INVALID_STRUCTURE;
+}
+
 AstraFdtResult astra_fdt_open(
     const void *data,
     size_t available,
@@ -85,6 +195,7 @@ AstraFdtResult astra_fdt_open(
     uint32_t version = 0;
     uint32_t last_compatible_version = 0;
     bool found_reserve_terminator = false;
+    AstraFdtResult structure_result = ASTRA_FDT_OK;
 
     if (data == NULL || view_out == NULL) {
         return ASTRA_FDT_INVALID_ARGUMENT;
@@ -151,6 +262,18 @@ AstraFdtResult astra_fdt_open(
         ranges_overlap(structure_offset, structure_size, reserve_offset, reserve_size) ||
         ranges_overlap(strings_offset, strings_size, reserve_offset, reserve_size)) {
         return ASTRA_FDT_INVALID_BLOCK;
+    }
+
+    structure_result = validate_structure_block(
+        bytes,
+        total_size,
+        structure_offset,
+        structure_size,
+        strings_offset,
+        strings_size
+    );
+    if (structure_result != ASTRA_FDT_OK) {
+        return structure_result;
     }
 
     view_out->data = bytes;
