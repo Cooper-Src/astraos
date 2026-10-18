@@ -24,7 +24,7 @@ sudo apt install clang lld xorriso dosfstools mtools file
 Then run from the repository root:
 
 ```sh
-./scripts/build.sh
+bash ./scripts/build.sh
 ```
 
 Outputs:
@@ -44,8 +44,8 @@ CODE=/usr/share/AAVMF/AAVMF_CODE.fd
 cp /usr/share/AAVMF/AAVMF_VARS.fd /tmp/astraos-vars.fd
 qemu-system-aarch64 \
   -machine virt -cpu cortex-a72 -m 1024 \
-  -drive if=pflash,format=raw,readonly=on,file="$CODE" \
-  -drive if=pflash,format=raw,file=/tmp/astraos-vars.fd \
+  -drive if=pflash,format=raw,unit=0,readonly=on,file="$CODE" \
+  -drive if=pflash,format=raw,unit=1,file=/tmp/astraos-vars.fd \
   -cdrom build/astraos-aarch64.iso -boot order=d \
   -display none -serial stdio -monitor none
 ```
