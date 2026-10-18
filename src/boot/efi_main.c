@@ -31,6 +31,7 @@ typedef EFI_UINT16 CHAR16;
 enum {
     EFI_ALLOCATE_ANY_PAGES = 0,
     EFI_LOADER_CODE = 1,
+    EFI_LOADER_DATA = 2,
     EFI_FILE_MODE_READ = 1
 };
 
@@ -240,6 +241,7 @@ static const EFI_GUID g_dtb_table_guid = {
     {0x83u, 0x0bu, 0xd9u, 0x15u, 0x2cu, 0x69u, 0xaau, 0xe0u}
 };
 static CHAR16 g_kernel_file_name[] = L"kernel.bin";
+static CHAR16 g_platform_dtb_file_name[] = L"platform.dtb";
 static EFI_UINT8 g_kernel_staging[KERNEL_STAGING_CAP];
 static EFI_UINT64 g_memory_map[MEMORY_MAP_WORDS];
 static AstraBootInfo g_boot_info;
@@ -283,10 +285,13 @@ static void loader_out(const CHAR16 *text) {
     }
 }
 
-static EFI_STATUS read_kernel(
+static EFI_STATUS read_efi_file(
     EFI_HANDLE image,
     EFI_SYSTEM_TABLE *system_table,
-    size_t *kernel_size_out
+    CHAR16 *file_name,
+    EFI_UINT8 *destination,
+    size_t destination_capacity,
+    size_t *file_size_out
 ) {
     EFI_STATUS status = EFI_SUCCESS;
     EFI_STATUS close_status = EFI_SUCCESS;
@@ -295,12 +300,14 @@ static EFI_STATUS read_kernel(
     EFI_SIMPLE_FILE_SYSTEM_PROTOCOL *file_system = NULL;
     EFI_FILE_PROTOCOL *root = NULL;
     EFI_FILE_PROTOCOL *file = NULL;
-    size_t total = 0;
+    size_t total = 0u;
 
     if (image == NULL || system_table == NULL || system_table->BootServices == NULL ||
-        kernel_size_out == NULL) {
+        file_name == NULL || destination == NULL || destination_capacity == 0u ||
+        file_size_out == NULL) {
         return EFI_INVALID_PARAMETER;
     }
+    *file_size_out = 0u;
 
     status = system_table->BootServices->HandleProtocol(
         image, &g_loaded_image_guid, &interface
@@ -334,7 +341,7 @@ static EFI_STATUS read_kernel(
         goto cleanup;
     }
 
-    status = root->Open(root, &file, g_kernel_file_name, EFI_FILE_MODE_READ, 0);
+    status = root->Open(root, &file, file_name, EFI_FILE_MODE_READ, 0);
     if (status != EFI_SUCCESS || file == NULL) {
         status = status == EFI_SUCCESS ? EFI_NOT_FOUND : status;
         goto cleanup;
@@ -345,38 +352,39 @@ static EFI_STATUS read_kernel(
     }
 
     for (;;) {
-        EFI_UINTN request = 0;
+        EFI_UINTN request = 0u;
+        size_t remaining = destination_capacity - total;
 
-        if (total == (size_t)KERNEL_STAGING_CAP) {
-            EFI_UINT8 extra_byte = 0;
-            request = 1;
+        if (remaining == 0u) {
+            EFI_UINT8 extra_byte = 0u;
+            request = 1u;
             status = file->Read(file, &request, &extra_byte);
             if (status != EFI_SUCCESS) {
                 goto cleanup;
             }
-            if (request != 0) {
+            if (request != 0u) {
                 status = EFI_BAD_BUFFER_SIZE;
                 goto cleanup;
             }
             break;
         }
 
-        request = (EFI_UINTN)((size_t)KERNEL_STAGING_CAP - total);
-        status = file->Read(file, &request, &g_kernel_staging[total]);
+        request = (EFI_UINTN)remaining;
+        status = file->Read(file, &request, &destination[total]);
         if (status != EFI_SUCCESS) {
             goto cleanup;
         }
-        if (request > (EFI_UINTN)((size_t)KERNEL_STAGING_CAP - total)) {
+        if (request > (EFI_UINTN)remaining) {
             status = EFI_BAD_BUFFER_SIZE;
             goto cleanup;
         }
-        if (request == 0) {
+        if (request == 0u) {
             break;
         }
         total += (size_t)request;
     }
 
-    if (total == 0) {
+    if (total == 0u) {
         status = EFI_LOAD_ERROR;
         goto cleanup;
     }
@@ -395,9 +403,24 @@ cleanup:
         }
     }
     if (status == EFI_SUCCESS) {
-        *kernel_size_out = total;
+        *file_size_out = total;
     }
     return status;
+}
+
+static EFI_STATUS read_kernel(
+    EFI_HANDLE image,
+    EFI_SYSTEM_TABLE *system_table,
+    size_t *kernel_size_out
+) {
+    return read_efi_file(
+        image,
+        system_table,
+        g_kernel_file_name,
+        g_kernel_staging,
+        sizeof g_kernel_staging,
+        kernel_size_out
+    );
 }
 
 static bool guid_equal(const EFI_GUID *left, const EFI_GUID *right) {
@@ -519,7 +542,7 @@ static bool find_dtb_available_size(
 }
 
 /* The firmware owns the DTB memory; the kernel borrows it after ExitBootServices. */
-static void capture_device_tree(
+static bool capture_device_tree_from_firmware(
     EFI_SYSTEM_TABLE *system_table,
     AstraBootInfo *boot_info
 ) {
@@ -529,47 +552,164 @@ static void capture_device_tree(
     AstraFdtResult result = ASTRA_FDT_OK;
     size_t available = 0u;
 
-    if (boot_info == NULL) {
-        return;
-    }
-    boot_info->device_tree_base = 0;
-    boot_info->device_tree_size = 0;
-    if (system_table == NULL || system_table->ConfigurationTable == NULL ||
-        system_table->NumberOfTableEntries == 0 ||
+    if (system_table == NULL || boot_info == NULL ||
+        system_table->ConfigurationTable == NULL ||
+        system_table->NumberOfTableEntries == 0u ||
         system_table->NumberOfTableEntries > (EFI_UINTN)MAX_CONFIGURATION_TABLES) {
-        return;
+        return false;
     }
 
     tables = system_table->ConfigurationTable;
-    for (EFI_UINTN i = 0; i < system_table->NumberOfTableEntries; i++) {
+    for (EFI_UINTN i = 0u; i < system_table->NumberOfTableEntries; i++) {
         if (!guid_equal(&tables[i].VendorGuid, &g_dtb_table_guid)) {
             continue;
         }
         if (tables[i].VendorTable == NULL) {
             loader_out(L"Warning: firmware device-tree pointer is null.\r\n");
-            return;
+            continue;
         }
-
         if (!find_dtb_available_size(
                 system_table->BootServices,
                 (EFI_UINT64)(uintptr_t)tables[i].VendorTable,
                 &available)) {
-            loader_out(L"Warning: device tree is outside reclaimable firmware memory.\r\n");
-            return;
+            loader_out(L"Warning: firmware device tree is outside ACPI reclaim memory.\r\n");
+            continue;
         }
 
         result = astra_fdt_open(tables[i].VendorTable, available, &view);
         if (result != ASTRA_FDT_OK) {
             loader_out(L"Warning: firmware device tree failed validation.\r\n");
-            return;
+            continue;
         }
 
         boot_info->device_tree_base = (EFI_UINT64)(uintptr_t)view.data;
         boot_info->device_tree_size = (EFI_UINT64)view.total_size;
         loader_out(L"Validated firmware device tree found.\r\n");
+        return true;
+    }
+    return false;
+}
+
+/*
+ * A valid firmware-provided DTB is preferred. If it is absent or invalid,
+ * a board-matched platform.dtb can be placed at the EFI partition root.
+ */
+static void capture_device_tree(
+    EFI_HANDLE image,
+    EFI_SYSTEM_TABLE *system_table,
+    AstraBootInfo *boot_info
+) {
+    EFI_STATUS status = EFI_SUCCESS;
+    EFI_STATUS free_status = EFI_SUCCESS;
+    AstraFdtView view;
+    AstraFdtView copied_view;
+    AstraFdtResult result = ASTRA_FDT_OK;
+    size_t file_size = 0u;
+    EFI_UINTN page_count = 0u;
+    EFI_UINT64 allocation_address = 0u;
+    EFI_UINT64 allocation_size = 0u;
+    EFI_UINT8 *destination = NULL;
+
+    if (boot_info == NULL) {
         return;
     }
-    loader_out(L"No firmware device tree table was provided.\r\n");
+    boot_info->device_tree_base = 0u;
+    boot_info->device_tree_size = 0u;
+
+    if (capture_device_tree_from_firmware(system_table, boot_info)) {
+        return;
+    }
+    if (system_table == NULL || system_table->BootServices == NULL ||
+        system_table->BootServices->AllocatePages == NULL ||
+        system_table->BootServices->FreePages == NULL) {
+        loader_out(L"Warning: platform.dtb fallback cannot be allocated.\r\n");
+        return;
+    }
+
+    status = read_efi_file(
+        image,
+        system_table,
+        g_platform_dtb_file_name,
+        g_kernel_staging,
+        sizeof g_kernel_staging,
+        &file_size
+    );
+    if (status == EFI_NOT_FOUND) {
+        loader_out(L"No firmware DTB or optional platform.dtb found.\r\n");
+        return;
+    }
+    if (status != EFI_SUCCESS) {
+        loader_out(L"Warning: could not read optional platform.dtb.\r\n");
+        return;
+    }
+
+    result = astra_fdt_open(g_kernel_staging, file_size, &view);
+    if (result != ASTRA_FDT_OK) {
+        loader_out(L"Warning: optional platform.dtb failed validation.\r\n");
+        return;
+    }
+    if (view.total_size > SIZE_MAX - ((size_t)PAGE_SIZE - 1u)) {
+        loader_out(L"Warning: platform.dtb size overflows page rounding.\r\n");
+        return;
+    }
+
+    page_count = (EFI_UINTN)(
+        (view.total_size + (size_t)PAGE_SIZE - 1u) / (size_t)PAGE_SIZE
+    );
+    if (page_count == 0u ||
+        (EFI_UINT64)page_count > UINT64_MAX / (EFI_UINT64)PAGE_SIZE) {
+        loader_out(L"Warning: platform.dtb page count is invalid.\r\n");
+        return;
+    }
+    allocation_size = (EFI_UINT64)page_count * (EFI_UINT64)PAGE_SIZE;
+
+    status = system_table->BootServices->AllocatePages(
+        EFI_ALLOCATE_ANY_PAGES,
+        EFI_LOADER_DATA,
+        page_count,
+        &allocation_address
+    );
+    if (status != EFI_SUCCESS) {
+        loader_out(L"Warning: could not allocate resident memory for platform.dtb.\r\n");
+        return;
+    }
+    if (allocation_address == 0u ||
+        (allocation_address % (EFI_UINT64)PAGE_SIZE) != 0u ||
+        allocation_address > (EFI_UINT64)UINTPTR_MAX ||
+        allocation_address > UINT64_MAX - allocation_size ||
+        allocation_size < (EFI_UINT64)view.total_size) {
+        free_status = system_table->BootServices->FreePages(
+            allocation_address,
+            page_count
+        );
+        if (free_status != EFI_SUCCESS) {
+            loader_out(L"Warning: invalid platform.dtb allocation could not be released.\r\n");
+        }
+        loader_out(L"Warning: firmware returned an invalid platform.dtb allocation.\r\n");
+        return;
+    }
+
+    destination = (EFI_UINT8 *)(uintptr_t)allocation_address;
+    for (size_t i = 0u; i < view.total_size; i++) {
+        destination[i] = g_kernel_staging[i];
+    }
+
+    result = astra_fdt_open(destination, view.total_size, &copied_view);
+    if (result != ASTRA_FDT_OK) {
+        free_status = system_table->BootServices->FreePages(
+            allocation_address,
+            page_count
+        );
+        if (free_status != EFI_SUCCESS) {
+            loader_out(L"Warning: failed DTB copy could not be released.\r\n");
+        }
+        loader_out(L"Warning: copied platform.dtb failed validation.\r\n");
+        return;
+    }
+
+    boot_info->device_tree_base = allocation_address;
+    boot_info->device_tree_size = (EFI_UINT64)copied_view.total_size;
+    loader_out(L"Loaded validated platform.dtb fallback.\r\n");
 }
 
 static void clear_framebuffer_info(AstraBootInfo *boot_info) {
@@ -766,7 +906,7 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *system_table) {
     g_boot_info.kernel_allocation_size = KERNEL_ALLOCATION_SIZE;
     clear_framebuffer_info(&g_boot_info);
     capture_framebuffer(boot_services, &g_boot_info);
-    capture_device_tree(system_table, &g_boot_info);
+    capture_device_tree(image, system_table, &g_boot_info);
 
     if (g_boot_info.framebuffer_base != 0) {
         loader_out(L"UEFI GOP framebuffer discovered.\r\n");
