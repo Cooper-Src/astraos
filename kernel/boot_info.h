@@ -4,7 +4,7 @@
 #include <stdint.h>
 
 #define ASTRA_BOOT_INFO_MAGIC UINT64_C(0x4153545241424f4f)
-#define ASTRA_BOOT_INFO_VERSION UINT64_C(2)
+#define ASTRA_BOOT_INFO_VERSION UINT64_C(3)
 
 typedef struct AstraBootInfo {
     uint64_t magic;
@@ -26,6 +26,8 @@ typedef struct AstraBootInfo {
     uint32_t framebuffer_green_mask;
     uint32_t framebuffer_blue_mask;
     uint32_t framebuffer_reserved_mask;
+    uint64_t device_tree_base;
+    uint64_t device_tree_size;
 } AstraBootInfo;
 
 /* Called by the AArch64 entry assembly after the stack is installed. */
