@@ -505,6 +505,64 @@ AstraVfsResult astra_vfs_read(
     return ASTRA_VFS_OK;
 }
 
+/* Validates the parent chain and computes the absolute path's byte length. */
+static bool node_absolute_path_length(
+    const AstraVfs *fs,
+    int node_id,
+    size_t *length_out
+) {
+    size_t length = 1u;
+    size_t depth = 0u;
+    int current = node_id;
+
+    if (fs == NULL || length_out == NULL ||
+        current < 0 || current >= ASTRA_VFS_MAX_NODES ||
+        !fs->nodes[0].used || !fs->nodes[0].is_directory ||
+        fs->nodes[0].parent != 0) {
+        return false;
+    }
+
+    while (current != 0) {
+        const AstraVfsNode *node = NULL;
+        size_t name_length = 0u;
+        size_t addition = 0u;
+
+        if (current < 0 || current >= ASTRA_VFS_MAX_NODES ||
+            depth >= (size_t)ASTRA_VFS_MAX_NODES) {
+            return false;
+        }
+        node = &fs->nodes[current];
+        if (!node->used) {
+            return false;
+        }
+        while (name_length < sizeof node->name &&
+            node->name[name_length] != '\0') {
+            name_length++;
+        }
+        if (name_length == 0u || name_length >= sizeof node->name) {
+            return false;
+        }
+
+        addition = name_length;
+        if (depth > 0u) {
+            if (addition == SIZE_MAX) {
+                return false;
+            }
+            addition++;
+        }
+        if (length > SIZE_MAX - addition) {
+            return false;
+        }
+        length += addition;
+
+        current = node->parent;
+        depth++;
+    }
+
+    *length_out = length;
+    return true;
+}
+
 AstraVfsResult astra_vfs_create(
     AstraVfs *fs,
     const char *path,
@@ -577,6 +635,29 @@ AstraVfsResult astra_vfs_create(
     existing_id = find_child(fs, parent_id, &path[name_start], name_len);
     if (existing_id >= 0) {
         return ASTRA_VFS_ALREADY_EXISTS;
+    }
+
+    {
+        size_t parent_path_length = 0u;
+        size_t suffix_length = name_len;
+        size_t new_path_length = 0u;
+
+        if (!node_absolute_path_length(fs, parent_id, &parent_path_length)) {
+            return ASTRA_VFS_NOT_FOUND;
+        }
+        if (parent_id != 0) {
+            if (suffix_length == SIZE_MAX) {
+                return ASTRA_VFS_PATH_TOO_LONG;
+            }
+            suffix_length++;
+        }
+        if (parent_path_length > SIZE_MAX - suffix_length) {
+            return ASTRA_VFS_PATH_TOO_LONG;
+        }
+        new_path_length = parent_path_length + suffix_length;
+        if (new_path_length >= (size_t)ASTRA_VFS_PATH_CAP) {
+            return ASTRA_VFS_PATH_TOO_LONG;
+        }
     }
 
     return add_node(
@@ -695,6 +776,50 @@ AstraVfsResult astra_vfs_chmod(
     }
     fs->nodes[id].mode = mode;
     return ASTRA_VFS_OK;
+}
+
+bool astra_vfs_format_mode(
+    uint16_t mode,
+    bool is_directory,
+    char *output,
+    size_t output_capacity
+) {
+    char permissions[11] = {0};
+
+    if (output == NULL || output_capacity < sizeof permissions || mode > 07777u) {
+        return false;
+    }
+
+    permissions[0] = is_directory ? 'd' : '-';
+    permissions[1] = (mode & 0400u) != 0u ? 'r' : '-';
+    permissions[2] = (mode & 0200u) != 0u ? 'w' : '-';
+    if ((mode & 04000u) != 0u) {
+        permissions[3] = (mode & 0100u) != 0u ? 's' : 'S';
+    } else {
+        permissions[3] = (mode & 0100u) != 0u ? 'x' : '-';
+    }
+
+    permissions[4] = (mode & 0040u) != 0u ? 'r' : '-';
+    permissions[5] = (mode & 0020u) != 0u ? 'w' : '-';
+    if ((mode & 02000u) != 0u) {
+        permissions[6] = (mode & 0010u) != 0u ? 's' : 'S';
+    } else {
+        permissions[6] = (mode & 0010u) != 0u ? 'x' : '-';
+    }
+
+    permissions[7] = (mode & 0004u) != 0u ? 'r' : '-';
+    permissions[8] = (mode & 0002u) != 0u ? 'w' : '-';
+    if ((mode & 01000u) != 0u) {
+        permissions[9] = (mode & 0001u) != 0u ? 't' : 'T';
+    } else {
+        permissions[9] = (mode & 0001u) != 0u ? 'x' : '-';
+    }
+    permissions[10] = '\0';
+
+    for (size_t i = 0; i < sizeof permissions; i++) {
+        output[i] = permissions[i];
+    }
+    return true;
 }
 
 const char *astra_vfs_result_name(AstraVfsResult result) {

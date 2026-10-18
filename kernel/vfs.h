@@ -115,6 +115,12 @@ AstraVfsResult astra_vfs_chmod(
     uint16_t mode
 );
 
+/* Formats Unix rwx/special-mode bits into 10 characters plus NUL.
+ * output is caller-owned and must have at least 11 bytes. Returns false
+ * without changing output for a null/short buffer or a mode above 07777. */
+bool astra_vfs_format_mode(uint16_t mode, bool is_directory, char *output,
+    size_t output_capacity);
+
 const char *astra_vfs_result_name(AstraVfsResult result);
 
 #endif

@@ -209,7 +209,61 @@ static void test_buffer_too_small_and_invalid_arguments(void) {
     CHECK(chmod_path(&fs, "/tmp/x", 010000u) == ASTRA_VFS_INVALID_ARGUMENT);
 }
 
+static void test_mode_formatting(void) {
+    char mode[11] = {0};
+    char small[10] = {0};
+    const char sentinel = '!';
+
+    CHECK(astra_vfs_format_mode(01777u, true, mode, sizeof mode));
+    CHECK(strcmp(mode, "drwxrwxrwt") == 0);
+
+    CHECK(astra_vfs_format_mode(04755u, false, mode, sizeof mode));
+    CHECK(strcmp(mode, "-rwsr-xr-x") == 0);
+
+    CHECK(astra_vfs_format_mode(04644u, false, mode, sizeof mode));
+    CHECK(strcmp(mode, "-rwSr--r--") == 0);
+
+    CHECK(astra_vfs_format_mode(02750u, true, mode, sizeof mode));
+    CHECK(strcmp(mode, "drwxr-s---") == 0);
+
+    mode[0] = sentinel;
+    CHECK(!astra_vfs_format_mode(0644u, false, small, sizeof small));
+    CHECK(small[0] == '\0');
+    CHECK(!astra_vfs_format_mode(010000u, false, mode, sizeof mode));
+    CHECK(mode[0] == sentinel);
+    CHECK(!astra_vfs_format_mode(0644u, false, NULL, sizeof mode));
+}
+
+static void test_create_enforces_absolute_path_limit(void) {
+    AstraVfs fs;
+    char component[ASTRA_VFS_NAME_CAP] = {0};
+    char current_path[ASTRA_VFS_PATH_CAP] = {0};
+    size_t written = 0u;
+
+    for (size_t i = 0; i + 1u < sizeof component; i++) {
+        component[i] = 'n';
+    }
+
+    CHECK(astra_vfs_init(&fs) == ASTRA_VFS_OK);
+    for (size_t i = 0; i < 7u; i++) {
+        CHECK(astra_vfs_create(&fs, component, sizeof component - 1u, true)
+            == ASTRA_VFS_OK);
+        CHECK(astra_vfs_chdir(&fs, component, sizeof component - 1u)
+            == ASTRA_VFS_OK);
+    }
+
+    CHECK(astra_vfs_pwd(&fs, current_path, sizeof current_path, &written)
+        == ASTRA_VFS_OK);
+    CHECK(written == 224u);
+    CHECK(astra_vfs_create(&fs, component, sizeof component - 1u, true)
+        == ASTRA_VFS_PATH_TOO_LONG);
+    CHECK(astra_vfs_stat(&fs, component, sizeof component - 1u,
+        &(AstraVfsEntry){0}) == ASTRA_VFS_NOT_FOUND);
+}
+
 int main(void) {
+    test_mode_formatting();
+    test_create_enforces_absolute_path_limit();
     test_initial_tree_and_pwd();
     test_read_write_and_capacity();
     test_permissions_and_owner_chmod();

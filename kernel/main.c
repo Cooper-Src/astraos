@@ -52,19 +52,13 @@ static const char *username(uint32_t uid) {
 }
 
 static void print_mode(uint16_t mode, bool is_directory) {
-    char permissions[10];
+    char permissions[11] = {0};
 
-    permissions[0] = is_directory ? 'd' : '-';
-    permissions[1] = (mode & 0400u) != 0 ? 'r' : '-';
-    permissions[2] = (mode & 0200u) != 0 ? 'w' : '-';
-    permissions[3] = (mode & 0100u) != 0 ? 'x' : '-';
-    permissions[4] = (mode & 0040u) != 0 ? 'r' : '-';
-    permissions[5] = (mode & 0020u) != 0 ? 'w' : '-';
-    permissions[6] = (mode & 0010u) != 0 ? 'x' : '-';
-    permissions[7] = (mode & 0004u) != 0 ? 'r' : '-';
-    permissions[8] = (mode & 0002u) != 0 ? 'w' : '-';
-    permissions[9] = (mode & 0001u) != 0 ? 'x' : '-';
-    astra_uart_write(permissions, sizeof permissions);
+    if (!astra_vfs_format_mode(mode, is_directory, permissions, sizeof permissions)) {
+        astra_uart_puts("??????????");
+        return;
+    }
+    astra_uart_write(permissions, sizeof permissions - 1u);
 }
 
 static void print_entry(const AstraVfsEntry *entry) {
