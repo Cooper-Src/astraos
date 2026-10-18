@@ -1,88 +1,89 @@
 # AstraOS
 
-AstraOS is an experimental ARM64 operating-system project. The current milestone is a bootable **AArch64 UEFI live shell**: its EFI application is compiled from the C source in this repository and launched directly by UEFI removable-media boot. The shell implements a small in-memory filesystem and Unix-style owner/mode checks without linking a hosted C runtime.
+AstraOS is an experimental from-scratch ARM64 operating-system project. The current development target is **AArch64 UEFI on QEMU's virt machine**. The boot image contains a small UEFI loader and a separately linked freestanding kernel.
 
-> **Alpha status:** this is a first bootable prototype, not yet a standalone general-purpose OS. UEFI currently handles keyboard and text-console I/O. The filesystem is RAM-only; the permission checks are enforced by the shell inside one address space and are not a security boundary. There is no scheduler, userspace process isolation, persistent disk filesystem, network stack, or general device-driver layer yet. Do not use it to protect data or as a replacement for your existing OS.
+> **Alpha status:** the kernel can own the CPU after ExitBootServices and start its own UART shell and RAM filesystem. This is not yet a general-purpose OS. The current interactive driver is specifically the PL011 UART at QEMU virt's 0x09000000 base. There is no framebuffer, USB/HID keyboard, network driver, storage driver, scheduler, userspace process isolation, or persistent filesystem yet. On most real ARM computers—including Snapdragon X-series laptops—the current kernel will not yet provide a usable screen and keyboard session. Do not install it over your existing OS or use it to protect data.
 
-## Current features
+## Current architecture
 
-- Native AArch64 PE/COFF EFI application at `EFI/BOOT/BOOTAA64.EFI`.
-- UEFI bootable ISO and a raw FAT EFI System Partition image.
-- AstraOS-owned command interpreter, RAM VFS, file and directory creation/removal, and octal file modes.
-- Basic users `root` and `astra`; `su astra` switches to the unprivileged demo account. Returning to root is intentionally not implemented because authentication is not implemented.
-- Automated CI build, QEMU UEFI startup smoke test, downloadable artifacts, and rolling development prerelease.
+- EFI/BOOT/BOOTAA64.EFI: AArch64 PE/COFF UEFI loader.
+- kernel.bin: flat freestanding AArch64 kernel image linked at 0x40200000.
+- kernel.elf: ELF kernel build used for symbol checks and debugging.
+- UEFI loader reads kernel.bin from the FAT ESP, reserves a fixed 2 MiB load region, copies/zeros the kernel memory, captures the UEFI memory map, calls ExitBootServices, and jumps to the kernel entry.
+- Kernel entry installs its own stack and masks interrupts. The kernel currently owns a polling PL011 console, a bounded command loop, and a fixed-size RAM VFS.
+- VFS uses caller-owned/static storage only: no heap and no hosted C runtime. Paths are bounded byte spans, file reads/writes are size-checked, and owner/mode bits plus sticky-directory behavior are covered by sanitizer tests.
 
-## Build locally
+## Build
 
-On Debian/Ubuntu, install the build dependencies:
+On Debian/Ubuntu, install the dependencies:
 
-```sh
-sudo apt update
-sudo apt install clang lld xorriso dosfstools mtools file
-```
+    sudo apt update
+    sudo apt install clang lld xorriso dosfstools mtools qemu-system-arm qemu-efi-aarch64 file
 
-Then run from the repository root:
+Build from the repository root:
 
-```sh
-bash ./scripts/build.sh
-```
+    bash ./scripts/build.sh
 
-Outputs:
+The build uses strict compiler warnings and fails on undefined kernel symbols. Outputs are:
 
-- `build/astraos-aarch64.iso` — UEFI optical-disc ISO.
-- `build/astraos-aarch64-esp.img` — FAT EFI System Partition image, useful for UEFI USB boot workflows.
-- `build/SHA256SUMS` — SHA-256 checksums.
+- build/astraos-aarch64.iso — UEFI bootable optical-disc image.
+- build/astraos-aarch64-esp.img — FAT EFI system partition image.
+- build/kernel.elf and build/kernel.bin — kernel debug and flat images.
+- build/SHA256SUMS — SHA-256 checksums.
 
-The compiler must support `--target=aarch64-pc-windows-msvc`; the script checks that the result is an ARM64 EFI application before making the image.
+## Boot and interact in QEMU
 
-## Boot in QEMU
+With QEMU ARM64 and AAVMF firmware installed, run:
 
-Install `qemu-system-arm` and an AArch64 UEFI firmware package (often `qemu-efi-aarch64`). On Ubuntu the firmware files are commonly under `/usr/share/AAVMF/`. Use a writable copy of the firmware variable store:
+    CODE="$(find /usr/share -name AAVMF_CODE.fd -print -quit)"
+    VARS_TEMPLATE="$(find /usr/share -name AAVMF_VARS.fd -print -quit)"
+    cp "$VARS_TEMPLATE" /tmp/astraos-vars.fd
+    qemu-system-aarch64 \
+      -machine virt -cpu cortex-a72 -m 1024 \
+      -drive if=pflash,format=raw,unit=0,readonly=on,file="$CODE" \
+      -drive if=pflash,format=raw,unit=1,file=/tmp/astraos-vars.fd \
+      -cdrom build/astraos-aarch64.iso -boot order=d \
+      -display none -serial stdio -monitor none
 
-```sh
-CODE=/usr/share/AAVMF/AAVMF_CODE.fd
-cp /usr/share/AAVMF/AAVMF_VARS.fd /tmp/astraos-vars.fd
-qemu-system-aarch64 \
-  -machine virt -cpu cortex-a72 -m 1024 \
-  -drive if=pflash,format=raw,unit=0,readonly=on,file="$CODE" \
-  -drive if=pflash,format=raw,unit=1,file=/tmp/astraos-vars.fd \
-  -cdrom build/astraos-aarch64.iso -boot order=d \
-  -display none -serial stdio -monitor none
-```
+The kernel shell appears on the serial terminal. Commands currently include:
 
-Firmware package paths differ by distribution; adjust `CODE` and the variable-store path as needed. The console shell stays running until `exit` is entered.
+    help
+    about
+    uname
+    mem
+    pwd
+    ls [PATH]
+    cd PATH
+    cat PATH
+    touch PATH
+    mkdir PATH
+    write PATH TEXT
+    rm PATH
+    chmod OCTAL PATH
+    whoami
+    id
+    su astra
+    echo TEXT
+    clear
+    halt
 
-## Try the shell
+For example, after boot, run ls /, cat /README.txt, mkdir /tmp/demo, touch /tmp/demo/test, and write /tmp/demo/test hello. All file changes are lost on reboot. su astra is a development/demo identity switch, not a security boundary; authentication and process isolation do not exist yet.
 
-```text
-help
-ls
-cat README.txt
-mkdir /home/astra/demo
-cd /home/astra/demo
-touch hello.txt
-write hello.txt hello from AstraOS
-cat hello.txt
-chmod 600 hello.txt
-su astra
-whoami
-```
+## Security and hardware limits
 
-The RAM filesystem resets on every reboot. This is intentional for the initial live prototype.
+The kernel is freestanding, but it is not secure for multi-user use. UID and mode checks are enforced within one kernel address space and can be bypassed by kernel code. There is no virtual memory isolation, syscall boundary, scheduler, privilege-separated userspace, capability model, or password authentication.
 
-## Real hardware notes
-
-The ISO targets **ARM64 UEFI firmware with removable-media boot enabled**. That does not mean it will boot on every ARM64 computer or phone. Secure Boot policy, vendor firmware, ACPI/device-tree handoff, display and input interfaces vary by device. The CI smoke test targets QEMU's `virt` machine; successful QEMU boot is not proof that drivers exist for a particular physical device. Qualcomm Snapdragon X-series systems may require platform-specific enablement before they are usable.
+The serial driver is only intended for QEMU virt. Real hardware requires platform support: boot-time ACPI/device-tree discovery, GOP/framebuffer output, input-controller drivers, clock/interrupt handling, and device-specific memory mappings. Booting a UEFI image on an ARM64 device is not evidence that the device has a working display, keyboard, USB, network, or storage path.
 
 ## Roadmap
 
-1. Replace the firmware-hosted shell with a separately linked kernel entry point and explicit boot handoff.
-2. Add a boot information contract (memory map, framebuffer, ACPI/device tree) and physical page allocator.
-3. Build kernel-owned serial/framebuffer drivers and interrupt handling.
-4. Add a VFS interface and persistent filesystem driver.
-5. Add user/kernel privilege separation, syscall boundary, process scheduler, and a real userspace init/shell.
-6. Expand hardware support and add reproducible real-device testing.
+1. Harden the loader/kernel handoff and add a kernel memory-map parser plus physical-page allocator.
+2. Add an EFI GOP framebuffer console and boot-time graphics metadata so hardware can show kernel output after boot services end.
+3. Add architecture exceptions, interrupt controller/timer setup, then a scheduler and user/kernel isolation.
+4. Implement storage discovery and a persistent on-disk filesystem with tested recovery/error handling.
+5. Add USB host-controller and HID support; only then consider Android USB tethering (USB enumeration, CDC-ECM/NCM/RNDIS variants, and network stack work are required).
+6. Add target-specific enablement for real devices and validate using serial logs and reproducible hardware tests.
 
 ## License
 
-MIT; see [LICENSE](LICENSE).
+MIT; see LICENSE.
