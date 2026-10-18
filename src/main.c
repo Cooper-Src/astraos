@@ -57,7 +57,6 @@ typedef struct {
     void *ConfigurationTable;
 } EFI_SYSTEM_TABLE;
 
-static EFI_SYSTEM_TABLE *gST;
 static EFI_SIMPLE_TEXT_OUTPUT_PROTOCOL *gOut;
 static EFI_SIMPLE_TEXT_INPUT_PROTOCOL *gIn;
 
@@ -269,7 +268,7 @@ static void cmd_cat(CHAR16 *path) {
     out(gNodes[id].content);if(s_len(gNodes[id].content) && gNodes[id].content[s_len(gNodes[id].content)-1]!='\n')newline();
 }
 
-static void cmd_create(CHAR16 *path, BOOLEAN directory) {
+static void cmd_create(const CHAR16 *path, BOOLEAN directory) {
     int parent = -1;
     int existing = -1;
     CHAR16 *slash = NULL;
@@ -386,7 +385,7 @@ static void cmd_write(CHAR16 *args) {
     out(L"written\r\n");
 }
 
-static void cmd_rm(CHAR16 *path) {
+static void cmd_rm(const CHAR16 *path) {
     int id = -1;
     int parent = -1;
     UINTN i = 0;
@@ -478,9 +477,11 @@ static void dispatch(CHAR16 *line) {
     else {found=FALSE;error(L"unknown command (type help)");(void)found;}
 }
 
+EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *systemTable);
+
 EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *systemTable) {
     EFI_INPUT_KEY key;EFI_STATUS status;UINTN len=0; (void)image;
-    gST=systemTable;gOut=systemTable->ConOut;gIn=systemTable->ConIn;
+    gOut=systemTable->ConOut;gIn=systemTable->ConIn;
     fs_init();
     if(gOut->ClearScreen)gOut->ClearScreen(gOut);
     out(L"\r\n==============================\r\n          ASTRAOS\r\n==============================\r\n\r\n");
