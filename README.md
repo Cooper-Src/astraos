@@ -13,6 +13,7 @@ AstraOS is an experimental from-scratch ARM64 operating-system project. The curr
 - Kernel entry installs its own stack and masks interrupts. It owns a bounded shell, an in-memory VFS, a physical-page allocator, a polling PL011 serial driver, and a software-rendered text console for supported GOP framebuffer formats.
 - The fixed-size VFS has bounded path/content interfaces and owner/mode checks. The early page allocator parses UEFI descriptors, tracks conventional 4 KiB pages with bitmaps, rejects overlapping memory ranges, reserves page zero, and currently manages physical memory below 4 GiB.
 - `kernel/fdt.[ch]` validates FDT v17-compatible headers, size/offset arithmetic, non-overlapping blocks, and the reservation-map terminator. The kernel revalidates the passed blob and can safely read the root `model` property. Sanitizer tests cover malformed headers, block ranges, and property bounds.
+- If firmware does not publish the standard DTB configuration table, the loader accepts an optional board-matched `platform.dtb` at the root of the EFI System Partition (maximum file size 1 MiB). It validates the blob before copying it to resident EFI loader memory. The `platform` command reports the root model/compatible strings and `/chosen/stdout-path`; reporting a UART path does not mean that UART driver is implemented. The DTB must match the exact device and board.
 - These checks still run in a single kernel address space. There is no userspace isolation, syscall boundary, scheduler, password authentication, or persistent storage.
 
 ## Build
