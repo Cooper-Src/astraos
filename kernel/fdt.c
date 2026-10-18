@@ -74,7 +74,6 @@ AstraFdtResult astra_fdt_open(
     AstraFdtView *view_out
 ) {
     const uint8_t *bytes = (const uint8_t *)data;
-    AstraFdtView view = {0};
     size_t reserve_position = 0;
     size_t reserve_size = 0;
     size_t total_size = 0;
@@ -154,15 +153,14 @@ AstraFdtResult astra_fdt_open(
         return ASTRA_FDT_INVALID_BLOCK;
     }
 
-    view.data = bytes;
-    view.total_size = total_size;
-    view.structure_offset = structure_offset;
-    view.structure_size = structure_size;
-    view.strings_offset = strings_offset;
-    view.strings_size = strings_size;
-    view.reserve_map_offset = reserve_offset;
-    view.reserve_map_size = reserve_size;
-    *view_out = view;
+    view_out->data = bytes;
+    view_out->total_size = total_size;
+    view_out->structure_offset = structure_offset;
+    view_out->structure_size = structure_size;
+    view_out->strings_offset = strings_offset;
+    view_out->strings_size = strings_size;
+    view_out->reserve_map_offset = reserve_offset;
+    view_out->reserve_map_size = reserve_size;
     return ASTRA_FDT_OK;
 }
 
@@ -173,7 +171,7 @@ AstraFdtResult astra_fdt_root_property(
     const uint8_t **value_out,
     size_t *value_length_out
 ) {
-    AstraFdtView checked_view = {0};
+    AstraFdtView checked_view;
     AstraFdtResult result = ASTRA_FDT_OK;
     size_t position = 0;
     size_t structure_end = 0;
