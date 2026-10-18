@@ -91,7 +91,7 @@ static void s_copy(CHAR16 *dst, const CHAR16 *src, UINTN cap) {
     UINTN i=0; if(cap==0)return; if(!src){dst[0]=0;return;}
     while(src[i] && i+1<cap){dst[i]=src[i];i++;} dst[i]=0;
 }
-static void out(const CHAR16 *s) { if(gOut && gOut->OutputString) gOut->OutputString(gOut,(CHAR16 *)s); }
+static void out(CHAR16 *s) { if (gOut != NULL && gOut->OutputString != NULL) { (void)gOut->OutputString(gOut, s); } }
 static void out_ch(CHAR16 c) { CHAR16 s[2]; s[0]=c;s[1]=0;out(s); }
 static void out_u32(UINT32 v) {
     CHAR16 b[16]; UINTN n=0; if(v==0){out_ch('0');return;}
@@ -105,15 +105,20 @@ static CHAR16 *skip_spaces(CHAR16 *s) { while(*s && is_space(*s))s++;return s; }
 static BOOLEAN is_root(void) { return gUid==ROOT_UID; }
 static const CHAR16 *username(UINT32 uid) { return uid==ROOT_UID?L"root":(uid==ASTRA_UID?L"astra":L"unknown"); }
 
+
 static BOOLEAN can_access(const VNode *n, UINT16 bit) {
-    UINT16 bits;
-    if(!n || !n->used)return FALSE;
-    if(gUid==ROOT_UID) {
-        if(bit==1 && (n->mode & 0111)==0)return FALSE;
+    UINT16 bits = 0;
+
+    if (n == NULL || !n->used) {
+        return FALSE;
+    }
+    if (gUid == ROOT_UID) {
         return TRUE;
     }
-    bits=(gUid==n->owner)?((n->mode>>6)&7):(n->mode&7);
-    return (bits & bit)!=0;
+
+    bits = (gUid == n->owner) ? (UINT16)((n->mode >> 6) & 7u)
+                              : (UINT16)(n->mode & 7u);
+    return (bits & bit) == bit;
 }
 static int node_add(int parent,const CHAR16 *name,BOOLEAN directory,UINT32 owner,UINT16 mode,const CHAR16 *content) {
     UINTN i;
@@ -127,25 +132,75 @@ static int child_find(int parent,const CHAR16 *name) {
     UINTN i; for(i=1;i<MAX_NODES;i++) if(gNodes[i].used && gNodes[i].parent==parent && s_cmp(gNodes[i].name,name)==0)return (int)i;
     return -1;
 }
+
 static int resolve_path(const CHAR16 *path) {
-    CHAR16 tmp[LINE_CAP], part[NAME_CAP]; UINTN i=0,j; int cur; const CHAR16 *p=path;
-    if(!path || !*path)return gCwd;
-    cur=(*p=='/')?0:gCwd;
-    while(*p) {
-        while(*p=='/')p++; if(!*p)break;
-        j=0; while(p[j] && p[j]!='/') { if(j+1<NAME_CAP)part[j]=p[j];j++; }
-        if(j>=NAME_CAP) return -1; part[j]=0; p+=j;
-        if(s_cmp(part,L".")==0)continue;
-        if(s_cmp(part,L"..")==0){if(cur!=0)cur=gNodes[cur].parent;continue;}
-        if(!gNodes[cur].directory || !can_access(&gNodes[cur],1))return -1;
-        cur=child_find(cur,part); if(cur<0)return -1;
+    CHAR16 part[NAME_CAP] = {0};
+    UINTN j = 0;
+    int cur = 0;
+    const CHAR16 *p = path;
+
+    if (path == NULL || *path == 0) {
+        return gCwd;
     }
-    (void)i;(void)tmp;return cur;
+
+    cur = (*p == '/') ? 0 : gCwd;
+    while (*p != 0) {
+        while (*p == '/') {
+            p++;
+        }
+        if (*p == 0) {
+            break;
+        }
+        if (cur < 0 || cur >= MAX_NODES || !gNodes[cur].used ||
+            !gNodes[cur].directory || !can_access(&gNodes[cur], 1u)) {
+            return -1;
+        }
+
+        j = 0;
+        while (p[j] != 0 && p[j] != '/') {
+            if (j >= NAME_CAP - 1u) {
+                return -1;
+            }
+            part[j] = p[j];
+            j++;
+        }
+        part[j] = 0;
+        p += j;
+
+        if (s_cmp(part, L".") == 0) {
+            continue;
+        }
+        if (s_cmp(part, L"..") == 0) {
+            if (cur != 0) {
+                cur = gNodes[cur].parent;
+            }
+            continue;
+        }
+
+        cur = child_find(cur, part);
+        if (cur < 0) {
+            return -1;
+        }
+    }
+
+    if (s_len(path) > 0 && path[s_len(path) - 1u] == '/' &&
+        !gNodes[cur].directory) {
+        return -1;
+    }
+    return cur;
 }
+
 static BOOLEAN valid_parent_for_write(int node) {
-    int parent; if(node<0 || node>=MAX_NODES || !gNodes[node].used)return FALSE;
-    parent=gNodes[node].parent;
-    return parent>=0 && gNodes[parent].directory && can_access(&gNodes[parent],3);
+    int parent = -1;
+
+    if (node <= 0 || node >= MAX_NODES || !gNodes[node].used) {
+        return FALSE;
+    }
+    parent = gNodes[node].parent;
+    if (parent < 0 || parent >= MAX_NODES || !gNodes[parent].directory) {
+        return FALSE;
+    }
+    return can_access(&gNodes[parent], 3u);
 }
 static void fs_init(void) {
     UINTN i; for(i=0;i<MAX_NODES;i++)gNodes[i].used=FALSE;
@@ -186,43 +241,181 @@ static void cmd_cat(CHAR16 *path) {
     if(!can_access(&gNodes[id],4)){error(L"permission denied");return;}
     out(gNodes[id].content);if(s_len(gNodes[id].content) && gNodes[id].content[s_len(gNodes[id].content)-1]!='\n')newline();
 }
-static void cmd_create(CHAR16 *path,BOOLEAN directory) {
-    int parent,existing; CHAR16 *slash=0; UINTN i,n=s_len(path); CHAR16 base[NAME_CAP],parentPath[LINE_CAP];
-    if(!path || !*path){error(L"path required");return;}
-    if(n>=LINE_CAP){error(L"path too long");return;}
-    s_copy(parentPath,path,LINE_CAP);
-    while(n>1 && parentPath[n-1]=='/')parentPath[--n]=0;
-    for(i=0;i<n;i++)if(parentPath[i]=='/')slash=&parentPath[i];
-    if(!slash){s_copy(base,parentPath,NAME_CAP);parent=gCwd;}
-    else if(slash==parentPath){s_copy(base,slash+1,NAME_CAP);parent=0;}
-    else {s_copy(base,slash+1,NAME_CAP);*slash=0;parent=resolve_path(parentPath);}
-    if(!base[0] || s_cmp(base,L".")==0 || s_cmp(base,L"..")==0){error(L"invalid name");return;}
-    if(parent<0 || !gNodes[parent].directory){error(L"parent directory not found");return;}
-    if(!can_access(&gNodes[parent],3)){error(L"permission denied");return;}
-    existing=child_find(parent,base);if(existing>=0){if(!directory && !gNodes[existing].directory){out(L"already exists\r\n");return;}error(L"name already exists");return;}
-    if(node_add(parent,base,directory,gUid,directory?0755:0644,L"")<0){error(L"RAM filesystem full");return;}
-    out(directory?L"directory created\r\n":L"file created\r\n");
+
+static void cmd_create(CHAR16 *path, BOOLEAN directory) {
+    int parent = -1;
+    int existing = -1;
+    CHAR16 *slash = NULL;
+    CHAR16 *base_src = NULL;
+    UINTN i = 0;
+    UINTN n = s_len(path);
+    CHAR16 base[NAME_CAP] = {0};
+    CHAR16 parent_path[LINE_CAP] = {0};
+
+    if (path == NULL || *path == 0) {
+        error(L"path required");
+        return;
+    }
+    if (n >= LINE_CAP) {
+        error(L"path too long");
+        return;
+    }
+
+    s_copy(parent_path, path, LINE_CAP);
+    while (n > 1u && parent_path[n - 1u] == '/') {
+        parent_path[--n] = 0;
+    }
+    for (i = 0; i < n; i++) {
+        if (parent_path[i] == '/') {
+            slash = &parent_path[i];
+        }
+    }
+
+    if (slash == NULL) {
+        base_src = parent_path;
+        parent = gCwd;
+    } else if (slash == parent_path) {
+        base_src = slash + 1;
+        parent = 0;
+    } else {
+        base_src = slash + 1;
+        *slash = 0;
+        parent = resolve_path(parent_path);
+    }
+
+    if (s_len(base_src) >= NAME_CAP) {
+        error(L"name too long");
+        return;
+    }
+    s_copy(base, base_src, NAME_CAP);
+    if (base[0] == 0 || s_cmp(base, L".") == 0 || s_cmp(base, L"..") == 0) {
+        error(L"invalid name");
+        return;
+    }
+    if (parent < 0 || parent >= MAX_NODES || !gNodes[parent].directory) {
+        error(L"parent directory not found");
+        return;
+    }
+    if (!can_access(&gNodes[parent], 3u)) {
+        error(L"permission denied");
+        return;
+    }
+
+    existing = child_find(parent, base);
+    if (existing >= 0) {
+        if (!directory && !gNodes[existing].directory) {
+            out(L"already exists\r\n");
+            return;
+        }
+        error(L"name already exists");
+        return;
+    }
+    if (node_add(parent, base, directory, gUid, directory ? 0755u : 0644u, L"") < 0) {
+        error(L"RAM filesystem full");
+        return;
+    }
+    out(directory ? L"directory created\r\n" : L"file created\r\n");
 }
+
 static void cmd_write(CHAR16 *args) {
-    CHAR16 *p=skip_spaces(args),*text; int id;
-    if(!*p){error(L"usage: write PATH TEXT");return;}
-    text=p;while(*text && !is_space(*text))text++;
-    if(!*text){error(L"usage: write PATH TEXT");return;}
-    *text++=0;text=skip_spaces(text);id=resolve_path(p);
-    if(id<0){error(L"file not found");return;}if(gNodes[id].directory){error(L"is a directory");return;}
-    if(!can_access(&gNodes[id],2)){error(L"permission denied");return;}
-    s_copy(gNodes[id].content,text,CONTENT_CAP);out(L"written\r\n");
+    CHAR16 *p = skip_spaces(args);
+    CHAR16 *text = NULL;
+    int id = -1;
+
+    if (*p == 0) {
+        error(L"usage: write PATH TEXT");
+        return;
+    }
+    text = p;
+    while (*text != 0 && !is_space(*text)) {
+        text++;
+    }
+    if (*text == 0) {
+        error(L"usage: write PATH TEXT");
+        return;
+    }
+    *text++ = 0;
+    text = skip_spaces(text);
+
+    id = resolve_path(p);
+    if (id < 0) {
+        error(L"file not found");
+        return;
+    }
+    if (gNodes[id].directory) {
+        error(L"is a directory");
+        return;
+    }
+    if (!can_access(&gNodes[id], 2u)) {
+        error(L"permission denied");
+        return;
+    }
+    if (s_len(text) >= CONTENT_CAP) {
+        error(L"content too long; file was not changed");
+        return;
+    }
+
+    s_copy(gNodes[id].content, text, CONTENT_CAP);
+    out(L"written\r\n");
 }
+
 static void cmd_rm(CHAR16 *path) {
-    int id;UINTN i;if(!path||!*path){error(L"usage: rm PATH");return;}
-    id=resolve_path(path);if(id<=0){error(L"path not found");return;}
-    if(!valid_parent_for_write(id)){error(L"permission denied");return;}
-    if(gNodes[id].directory){for(i=1;i<MAX_NODES;i++)if(gNodes[i].used && gNodes[i].parent==id){error(L"directory not empty");return;}}
-    gNodes[id].used=FALSE;out(L"removed\r\n");
+    int id = -1;
+    int parent = -1;
+    UINTN i = 0;
+
+    if (path == NULL || *path == 0) {
+        error(L"usage: rm PATH");
+        return;
+    }
+    id = resolve_path(path);
+    if (id <= 0) {
+        error(L"path not found");
+        return;
+    }
+    if (!valid_parent_for_write(id)) {
+        error(L"permission denied");
+        return;
+    }
+
+    parent = gNodes[id].parent;
+    if ((gNodes[parent].mode & 01000u) != 0 && !is_root() &&
+        gUid != gNodes[parent].owner && gUid != gNodes[id].owner) {
+        error(L"sticky directory: only its owner, file owner, or root may remove this entry");
+        return;
+    }
+
+    if (gNodes[id].directory) {
+        for (i = 1; i < MAX_NODES; i++) {
+            if (gNodes[i].used && gNodes[i].parent == id) {
+                error(L"directory not empty");
+                return;
+            }
+        }
+    }
+    gNodes[id].used = FALSE;
+    out(L"removed\r\n");
 }
+
 static int parse_octal(const CHAR16 *s) {
-    int v=0;UINTN i=0;if(!s || !*s)return -1;
-    while(s[i]){if(s[i]<'0'||s[i]>'7')return -1;v=(v*8)+(int)(s[i]-'0');if(v>07777)return -1;i++;}return v;
+    int value = 0;
+    UINTN i = 0;
+
+    if (s == NULL || *s == 0) {
+        return -1;
+    }
+    while (s[i] != 0) {
+        int digit = (int)(s[i] - '0');
+        if (digit < 0 || digit > 7) {
+            return -1;
+        }
+        if (value > (07777 - digit) / 8) {
+            return -1;
+        }
+        value = (value * 8) + digit;
+        i++;
+    }
+    return value;
 }
 static void cmd_chmod(CHAR16 *args) {
     CHAR16 *mode=skip_spaces(args),*path;int m,id;
