@@ -72,7 +72,7 @@ static void make_fixture(AstraBootInfo *boot_info_out) {
     rsdp[4] = (uint8_t)'P';
     rsdp[5] = (uint8_t)'T';
     rsdp[6] = (uint8_t)'R';
-    rsdp[7] = 0u;
+    rsdp[7] = (uint8_t)' ';
     rsdp[15] = 2u;
     write_u32_le(&rsdp[20], 36u);
     write_u64_le(&rsdp[24], region_base + (uint64_t)TEST_XSDT_OFFSET);
