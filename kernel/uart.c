@@ -1,4 +1,5 @@
 #include "uart.h"
+#include "framebuffer.h"
 
 enum {
     UART_DATA = 0,
@@ -32,6 +33,7 @@ void astra_uart_put_byte(uint8_t value) {
     while ((g_uart[UART_FLAGS] & UART_FLAG_TX_FULL) != 0) {
     }
     g_uart[UART_DATA] = (uint32_t)value;
+    astra_framebuffer_put_byte(value);
 }
 
 void astra_uart_write(const char *data, size_t length) {
