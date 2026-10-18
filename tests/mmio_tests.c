@@ -76,12 +76,12 @@ static void test_valid_and_boundary_ranges(void) {
     CHECK(astra_mmio_range_is_valid(&info, UINT64_C(0x09000000), 72u));
     CHECK(astra_mmio_range_is_valid(&info, UINT64_C(0x09000ffc), 4u));
     CHECK(astra_mmio_range_is_valid(&info, UINT64_C(0x10001000), 4096u));
+    CHECK(!astra_mmio_range_is_valid(&info, UINT64_C(0x09001000), 4u));
+    CHECK(!astra_mmio_range_is_valid(&info, UINT64_C(0x09000fc0), 72u));
 
     /* Some firmware marks platform-described device windows as reserved. */
     set_descriptor(1u, 0u, UINT64_C(0x09000000), 1u);
     CHECK(astra_mmio_range_is_valid(&info, UINT64_C(0x09000000), 72u));
-    CHECK(!astra_mmio_range_is_valid(&info, UINT64_C(0x09001000), 4u));
-    CHECK(!astra_mmio_range_is_valid(&info, UINT64_C(0x09000fc0), 72u));
 }
 
 static void test_unlisted_device_window_is_allowed_without_conflicts(void) {
