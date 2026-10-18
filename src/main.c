@@ -686,3 +686,4 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *systemTable) {
         }
     }
 }
+#endif /* ASTRAOS_TEST */
