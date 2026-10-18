@@ -57,7 +57,6 @@ static uint64_t g_cursor_x = 0;
 static uint64_t g_cursor_y = 0;
 static const uint32_t COLOR_BACKGROUND = 0x071321u;
 static const uint32_t COLOR_FOREGROUND = 0xd8e6f2u;
-static const uint32_t COLOR_ACCENT = 0x56d6c2u;
 
 static bool add_overflow_size(size_t left, size_t right, size_t *out) {
     if (out == NULL || left > SIZE_MAX - right) {
