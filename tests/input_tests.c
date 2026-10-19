@@ -47,6 +47,10 @@ static void test_firmware_function_key_translation(void) {
     AstraFirmwareInputKey key = {0};
     uint8_t byte = 0u;
 
+    key.scan_code = UINT16_C(0x0017);
+    CHECK(astra_input_translate_firmware_key(&key, &byte));
+    CHECK(byte == (uint8_t)ASTRA_INPUT_KEY_ESCAPE);
+
     key.scan_code = UINT16_C(0x000b);
     CHECK(astra_input_translate_firmware_key(&key, &byte));
     CHECK(byte == (uint8_t)ASTRA_INPUT_KEY_F1);
