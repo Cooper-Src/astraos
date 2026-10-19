@@ -5,6 +5,7 @@
 #include "exceptions.h"
 #include "memory.h"
 #include "input.h"
+#include "desktop.h"
 #include "uart.h"
 #include "vfs.h"
 
@@ -298,7 +299,7 @@ static void command_dispatch(const char *command, size_t command_len,
         astra_uart_puts(
             "AstraOS kernel commands:\n"
             "  help, about, uname, platform, mem\n"
-            "  palloc, pfree HEX_ADDRESS, clear, halt, exception-test\n"
+            "  palloc, pfree HEX_ADDRESS, clear, desktop, halt, exception-test\n"
             "  pwd, ls [PATH], cd PATH, cat PATH\n"
             "  touch PATH, mkdir PATH, write PATH TEXT, rm PATH\n"
             "  chmod OCTAL PATH, whoami, id, su astra\n"
@@ -311,6 +312,7 @@ static void command_dispatch(const char *command, size_t command_len,
             "The console uses a validated FDT or ACPI SPCR PL011 when available.\n"
             "Generic images can use UEFI text input as a keyboard fallback.\n"
             "Native USB/HID drivers and interrupt support remain incomplete.\n"
+            "A small in-kernel framebuffer desktop is available with the desktop command.\n"
         );
     } else if (token_equals(command, command_len, "uname")) {
         astra_uart_puts("AstraOS astra-aarch64 0.2 kernel\n");
@@ -413,6 +415,12 @@ static void command_dispatch(const char *command, size_t command_len,
         astra_uart_puts("physical page returned to allocator\n");
     } else if (token_equals(command, command_len, "clear")) {
         astra_uart_puts("\x1b[2J\x1b[H");
+    } else if (token_equals(command, command_len, "desktop")) {
+        if (args_len != 0u) {
+            astra_uart_puts("usage: desktop\n");
+            return;
+        }
+        astra_desktop_run();
     } else if (token_equals(command, command_len, "halt")) {
         astra_uart_puts("AstraOS halted. Reset the machine to reboot.\n");
         for (;;) {
@@ -740,6 +748,12 @@ void astra_kernel_main(const AstraBootInfo *boot_info) {
         for (;;) {
             __asm__ volatile("wfe");
         }
+    }
+
+    if (boot_info != NULL && boot_info->magic == ASTRA_BOOT_INFO_MAGIC &&
+        boot_info->version == ASTRA_BOOT_INFO_VERSION &&
+        (boot_info->flags & ASTRA_BOOT_FLAG_DESKTOP_MODE) != 0u) {
+        astra_desktop_run();
     }
 
     line[0] = '\0';
