@@ -338,7 +338,8 @@ void astra_framebuffer_draw_text(
     uint32_t foreground = 0u;
     uint32_t background = 0u;
 
-    if (!g_fb.active || text == NULL || x >= g_fb.width || y >= g_fb.height) {
+    if (!g_fb.active || text == NULL || x >= g_fb.width || y >= g_fb.height ||
+        g_fb.width - x < FB_CELL_WIDTH || g_fb.height - y < FB_CELL_HEIGHT) {
         return;
     }
     foreground = color_pixel(
