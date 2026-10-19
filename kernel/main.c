@@ -312,7 +312,7 @@ static void command_dispatch(const char *command, size_t command_len,
             "UEFI is used for boot, device discovery, and the memory-map handoff.\n"
             "The console uses a validated FDT or ACPI SPCR PL011 when available.\n"
             "Generic images can use UEFI text input as a keyboard fallback.\n"
-            "Native USB/HID drivers and interrupt support remain incomplete.\n"
+            "Native USB/HID drivers, pointer input, processes, and IPC remain incomplete.\n"
         );
     } else if (token_equals(command, command_len, "uname")) {
         astra_uart_puts("AstraOS astra-aarch64 0.2 kernel\n");
@@ -415,7 +415,7 @@ static void command_dispatch(const char *command, size_t command_len,
         astra_uart_puts("physical page returned to allocator\n");
     } else if (token_equals(command, command_len, "desktop")) {
         if (args_len != 0u) {
-            astra_uart_puts("usage: desktop\\n");
+            astra_uart_puts("usage: desktop\n");
             return;
         }
         (void)astra_desktop_run(&g_vfs);
