@@ -78,6 +78,7 @@ KERNEL_FLAGS=(
 
 KERNEL_SOURCES=(
     "$ROOT/kernel/main.c"
+    "$ROOT/kernel/display.c"
     "$ROOT/kernel/exceptions.c"
     "$ROOT/kernel/fdt.c"
     "$ROOT/kernel/acpi.c"
@@ -145,6 +146,7 @@ create_esp() {
     local volume_label="$2"
     local dtb_path="$3"
     local console_mode="${4:-serial}"
+    local desktop_mode="${5:-none}"
 
     dd if=/dev/zero of="$output" bs=1M count=64 status=none
     mkfs.vfat -F 32 -n "$volume_label" "$output" >/dev/null
@@ -157,6 +159,9 @@ create_esp() {
     fi
     if [[ "$console_mode" == "uefi-keyboard" ]]; then
         mcopy -i "$output" "$BUILD/keyboard-console.cfg" ::/keyboard-console.cfg
+    fi
+    if [[ "$desktop_mode" == "desktop" ]]; then
+        mcopy -i "$output" "$BUILD/desktop-mode.cfg" ::/desktop-mode.cfg
     fi
     mdir -i "$output" ::/ >/dev/null
 }
@@ -180,6 +185,7 @@ create_iso() {
 }
 
 printf '%s\n' 'ASTRAOS_UEFI_KEYBOARD=1' > "$BUILD/keyboard-console.cfg"
+printf '%s\n' 'ASTRAOS_DESKTOP=1' > "$BUILD/desktop-mode.cfg"
 
 echo "==> Creating generic ARM64 EFI System Partition"
 create_esp "$BUILD/astraos-aarch64-esp.img" "ASTRAOS" "" "uefi-keyboard"
@@ -193,17 +199,22 @@ create_esp "$BUILD/astraos-qemu-virt-esp.img" "ASTRAQEMU" "$BUILD/platform.dtb"
 echo "==> Creating QEMU keyboard EFI System Partition"
 create_esp "$BUILD/astraos-qemu-keyboard-esp.img" "ASTRAKEYB" "$BUILD/platform.dtb" "uefi-keyboard"
 
+echo "==> Creating QEMU desktop EFI System Partition"
+create_esp "$BUILD/astraos-qemu-desktop-esp.img" "ASTRADESK" "$BUILD/platform.dtb" "uefi-keyboard" "desktop"
+
 echo "==> Creating UEFI-bootable ARM64 ISO images"
 create_iso "$BUILD/astraos-aarch64.iso" "$BUILD/astraos-aarch64-esp.img" "ASTRAOS"
 create_iso "$BUILD/astraos-qemu-virt.iso" "$BUILD/astraos-qemu-virt-esp.img" "ASTRAQEMU"
 create_iso "$BUILD/astraos-qemu-keyboard.iso" "$BUILD/astraos-qemu-keyboard-esp.img" "ASTRAKEYB"
+create_iso "$BUILD/astraos-qemu-desktop.iso" "$BUILD/astraos-qemu-desktop-esp.img" "ASTRADESK"
 
 (
     cd "$BUILD"
     sha256sum \
         astraos-aarch64.iso astraos-aarch64-esp.img \
         astraos-qemu-virt.iso astraos-qemu-virt-esp.img \
-        astraos-qemu-keyboard.iso astraos-qemu-keyboard-esp.img > SHA256SUMS
+        astraos-qemu-keyboard.iso astraos-qemu-keyboard-esp.img \
+        astraos-qemu-desktop.iso astraos-qemu-desktop-esp.img > SHA256SUMS
     sha256sum -c SHA256SUMS
 )
 
@@ -213,5 +224,7 @@ echo "Built: $BUILD/astraos-qemu-virt.iso"
 echo "Built: $BUILD/astraos-qemu-virt-esp.img"
 echo "Built: $BUILD/astraos-qemu-keyboard.iso"
 echo "Built: $BUILD/astraos-qemu-keyboard-esp.img"
+echo "Built: $BUILD/astraos-qemu-desktop.iso"
+echo "Built: $BUILD/astraos-qemu-desktop-esp.img"
 echo "Kernel: $BUILD/kernel.elf (ELF), $BUILD/kernel.bin (flat image)"
 echo "Checksums: $BUILD/SHA256SUMS"

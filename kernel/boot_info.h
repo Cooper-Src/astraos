@@ -9,6 +9,7 @@
 
 #define ASTRA_BOOT_FLAG_BOOT_SERVICES_ACTIVE (UINT64_C(1) << 0u)
 #define ASTRA_BOOT_FLAG_UEFI_TEXT_INPUT (UINT64_C(1) << 1u)
+#define ASTRA_BOOT_FLAG_DESKTOP_MODE (UINT64_C(1) << 2u)
 
 typedef struct AstraFirmwareInputKey {
     uint16_t scan_code;

@@ -142,11 +142,38 @@ static void test_bitmask_format_validation(void) {
     CHECK(!astra_framebuffer_is_active());
 }
 
+static void test_public_drawing_primitives(void) {
+    AstraBootInfo info = {0};
+    uint32_t width = 0u;
+    uint32_t height = 0u;
+
+    clear_pixels();
+    info = make_boot_info();
+    astra_framebuffer_init(&info);
+    CHECK(astra_framebuffer_get_dimensions(&width, &height));
+    CHECK(width == TEST_FB_WIDTH);
+    CHECK(height == TEST_FB_HEIGHT);
+
+    astra_framebuffer_fill_rect(10u, 10u, 4u, 3u, UINT32_C(0x123456));
+    CHECK(g_pixels[(size_t)10u * TEST_FB_WIDTH + 10u] == UINT32_C(0xff123456));
+    astra_framebuffer_fill_rect(63u, 47u, 10u, 10u, UINT32_C(0xff0000));
+    CHECK(g_pixels[(size_t)47u * TEST_FB_WIDTH + 63u] == UINT32_C(0xffff0000));
+
+    astra_framebuffer_fill_rect(0u, 0u, TEST_FB_WIDTH, TEST_FB_HEIGHT, 0u);
+    astra_framebuffer_set_console_enabled(false);
+    astra_framebuffer_put_byte((uint8_t)'A');
+    CHECK(g_pixels[(size_t)TEST_FB_WIDTH + 2u] == UINT32_C(0xff000000));
+    astra_framebuffer_set_console_enabled(true);
+    astra_framebuffer_draw_text(0u, 0u, "A", 1u, UINT32_C(0xabcdef));
+    CHECK(g_pixels[(size_t)TEST_FB_WIDTH + 2u] == UINT32_C(0xffabcdef));
+}
+
 int main(void) {
     test_framebuffer_init_and_glyph_render();
     test_clear_and_escape_sequences();
     test_invalid_metadata_disables_framebuffer();
     test_bitmask_format_validation();
+    test_public_drawing_primitives();
 
     if (g_failures != 0) {
         (void)fprintf(stderr, "%d AstraOS framebuffer test(s) failed\n", g_failures);
