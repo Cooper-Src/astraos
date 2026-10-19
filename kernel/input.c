@@ -29,6 +29,7 @@ static uint64_t g_firmware_exception_level = 0u;
 static uint64_t g_firmware_exception_vector = 0u;
 static uint64_t g_firmware_daif = 0u;
 
+#if defined(__aarch64__)
 /*
  * Temporarily restores firmware exception handling while calling UEFI input
  * services. The kernel masks interrupts and installs its own vectors at entry;
@@ -125,6 +126,8 @@ static void firmware_context_leave(const AstraFirmwareCallState *state) {
     (void)state;
 #endif
 }
+
+#endif
 
 static uint64_t firmware_read_key(AstraFirmwareInputKey *key_out) {
     AstraFirmwareCallState state = {0};
