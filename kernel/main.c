@@ -413,6 +413,12 @@ static void command_dispatch(const char *command, size_t command_len,
             return;
         }
         astra_uart_puts("physical page returned to allocator\n");
+    } else if (token_equals(command, command_len, "desktop")) {
+        if (args_len != 0u) {
+            astra_uart_puts("usage: desktop\\n");
+            return;
+        }
+        (void)astra_desktop_run(&g_vfs);
     } else if (token_equals(command, command_len, "clear")) {
         astra_uart_puts("\x1b[2J\x1b[H");
     } else if (token_equals(command, command_len, "halt")) {
