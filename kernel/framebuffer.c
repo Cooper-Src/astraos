@@ -311,7 +311,7 @@ void astra_framebuffer_draw_text(uint32_t x, uint32_t y, const char *text,
     background = color_pixel((uint8_t)(background_rgb >> 16u),
         (uint8_t)(background_rgb >> 8u), (uint8_t)background_rgb);
 
-    for (uint32_t i = 0u; i < max_cells && text[i] != '\\0'; i++) {
+    for (uint32_t i = 0u; i < max_cells && text[i] != '\0'; i++) {
         uint32_t cell_x = x + i * FB_CELL_WIDTH;
         fill_rect(cell_x, y, FB_CELL_WIDTH, FB_CELL_HEIGHT, background);
         for (uint32_t row = 0u; row < FB_FONT_HEIGHT; row++) {
