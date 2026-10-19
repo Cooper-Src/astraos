@@ -309,7 +309,8 @@ static void command_dispatch(const char *command, size_t command_len,
             "AstraOS kernel 0.2: freestanding AArch64 kernel.\n"
             "UEFI is used for boot, device discovery, and the memory-map handoff.\n"
             "The console uses a validated FDT or ACPI SPCR PL011 when available.\n"
-            "Framebuffer-only platforms still need a native input driver.\n"
+            "Generic images can use UEFI text input as a keyboard fallback.\n"
+            "Native USB/HID drivers and interrupt support remain incomplete.\n"
         );
     } else if (token_equals(command, command_len, "uname")) {
         astra_uart_puts("AstraOS astra-aarch64 0.2 kernel\n");
