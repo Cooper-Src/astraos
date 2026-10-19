@@ -177,7 +177,7 @@ jobs:
             --repo "$GITHUB_REPOSITORY" \
             --target "$TARGET_SHA" \
             --title "AstraOS ${VERSION} — Alpha" \
-            --notes "First official versioned AstraOS alpha release.
+            --notes "Official versioned AstraOS alpha release.
 
           This release packages the freestanding AArch64 kernel and UEFI live images. CI runs sanitizer-backed parser and kernel tests, validates the generated images and checksums, and smoke-tests UEFI boot to the interactive shell in QEMU.
 
