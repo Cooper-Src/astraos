@@ -227,13 +227,15 @@ jobs:
             build/astraos-aarch64.iso build/astraos-aarch64-esp.img \
             build/astraos-qemu-virt.iso build/astraos-qemu-virt-esp.img \
             build/astraos-qemu-keyboard.iso build/astraos-qemu-keyboard-esp.img \
+            build/astraos-desktop.iso build/astraos-desktop-esp.img \
+            build/astraos-qemu-desktop.iso build/astraos-qemu-desktop-esp.img \
             build/kernel.elf build/kernel.bin build/SHA256SUMS \
             --repo "$GITHUB_REPOSITORY" \
             --target "$TARGET_SHA" \
             --title "AstraOS ${VERSION} — Alpha" \
             --notes "Official versioned AstraOS alpha release.
 
-          This release packages the freestanding AArch64 kernel and UEFI live images. CI runs sanitizer-backed parser and kernel tests, validates the generated images and checksums, and smoke-tests UEFI boot to the interactive shell in QEMU.
+          This release packages the freestanding AArch64 kernel, UEFI live images, and an early keyboard-driven framebuffer desktop. CI runs sanitizer-backed kernel/parser/display-server tests, validates the generated images and checksums, and smoke-tests UEFI boot, shell input, and desktop interaction in QEMU.
 
           **Alpha limitations:** AstraOS remains experimental and is currently validated against QEMU's AArch64 `virt` machine. A passing QEMU test does not imply support for physical laptops or phones. It is not a secure multi-user OS, has no persistent storage or process isolation, and must not be installed over an existing operating system or used to protect data.
 
