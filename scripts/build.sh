@@ -51,6 +51,10 @@ run_host_test input_tests \
 run_host_test framebuffer_tests \
     "$ROOT/tests/framebuffer_tests.c" "$ROOT/kernel/framebuffer.c"
 
+run_host_test display_server_tests \
+    "$ROOT/tests/display_server_tests.c" "$ROOT/kernel/display_server.c" \
+    "$ROOT/kernel/framebuffer.c"
+
 echo "==> Fuzzing FDT parser with ASan and UBSan"
 clang -std=c17 -g -O1 -Wall -Wextra -Wpedantic -Werror \
     -fsanitize=fuzzer,address,undefined -fno-sanitize-recover=undefined \
@@ -82,6 +86,8 @@ KERNEL_SOURCES=(
     "$ROOT/kernel/fdt.c"
     "$ROOT/kernel/acpi.c"
     "$ROOT/kernel/framebuffer.c"
+    "$ROOT/kernel/display_server.c"
+    "$ROOT/kernel/desktop.c"
     "$ROOT/kernel/memory.c"
     "$ROOT/kernel/mmio.c"
     "$ROOT/kernel/platform.c"
