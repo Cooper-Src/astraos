@@ -158,22 +158,27 @@ static void focus_surface(AstraDisplaySurface *surface) {
         return;
     }
     if (g_next_z_order == UINT32_MAX) {
+        bool assigned[DISPLAY_SURFACE_CAP] = {false, false, false, false};
         uint32_t next_order = 1u;
+
         for (size_t pass = 0u; pass < DISPLAY_SURFACE_CAP; pass++) {
-            AstraDisplaySurface *lowest = NULL;
+            size_t selected = DISPLAY_SURFACE_CAP;
+            uint32_t lowest_z = UINT32_MAX;
+
             for (size_t index = 0u; index < DISPLAY_SURFACE_CAP; index++) {
-                AstraDisplaySurface *candidate = &g_surfaces[index];
-                if (!candidate->visible || candidate->z_order >= next_order) {
+                const AstraDisplaySurface *candidate = &g_surfaces[index];
+                if (!candidate->visible || assigned[index] ||
+                    candidate->z_order >= lowest_z) {
                     continue;
                 }
-                if (lowest == NULL || candidate->z_order < lowest->z_order) {
-                    lowest = candidate;
-                }
+                selected = index;
+                lowest_z = candidate->z_order;
             }
-            if (lowest == NULL) {
+            if (selected == DISPLAY_SURFACE_CAP) {
                 break;
             }
-            lowest->z_order = next_order;
+            assigned[selected] = true;
+            g_surfaces[selected].z_order = next_order;
             next_order++;
         }
         g_next_z_order = next_order;
@@ -615,7 +620,8 @@ bool astra_display_server_run(void) {
             return false;
         }
 
-        if (focus != NULL && focus->app == DISPLAY_APP_TERMINAL) {
+        if (focus != NULL && focus->app == DISPLAY_APP_TERMINAL &&
+            key != (uint8_t)'C') {
             handle_terminal_key(key);
             render_desktop();
             continue;
@@ -642,6 +648,9 @@ bool astra_display_server_run(void) {
                 break;
             case 'c':
             case 'C':
+                if (focus != NULL && focus->app == DISPLAY_APP_TERMINAL) {
+                    astra_uart_puts("desktop: terminal window closed\n");
+                }
                 close_surface(focus);
                 break;
             case 'q':
