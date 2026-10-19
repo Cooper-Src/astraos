@@ -70,6 +70,9 @@ static void test_window_creation_focus_and_bounds(void) {
     CHECK(astra_display_server_width() == TEST_FB_WIDTH);
     CHECK(astra_display_server_height() == TEST_FB_HEIGHT);
     CHECK(astra_display_server_window_count() == 0u);
+    astra_framebuffer_put_byte((uint8_t)'A');
+    CHECK(g_pixels[(size_t)2u * (size_t)TEST_FB_WIDTH + 1u] ==
+        UINT32_C(0xff0b111b));
 
     CHECK(astra_display_server_open_window(
         "Terminal", 400u, 240u, paint_probe, NULL, &terminal_id));
