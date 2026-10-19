@@ -148,7 +148,16 @@ def main(argv: list[str]) -> int:
         wait_for_log(log_path, "AstraOS kernel commands:", SHELL_TIMEOUT)
         type_command(client, "uname")
         wait_for_log(log_path, "AstraOS astra-aarch64 0.2 kernel", SHELL_TIMEOUT)
-        print("UEFI keyboard smoke test passed: QEMU keyboard input reached the AstraOS shell.")
+        type_command(client, "desktop")
+        wait_for_log(log_path, "AstraOS desktop started.", SHELL_TIMEOUT)
+        client.send_key("f2")
+        wait_for_log(log_path, "System monitor opened.", SHELL_TIMEOUT)
+        client.send_key("esc")
+        wait_for_log(log_path, "Returned to AstraOS shell.", SHELL_TIMEOUT)
+        print(
+            "UEFI keyboard smoke test passed: shell, desktop compositor, "
+            "F2 window launch, and Escape-to-shell all worked."
+        )
         return 0
     except (OSError, RuntimeError, TimeoutError, ValueError, json.JSONDecodeError) as error:
         print(f"keyboard smoke test failed: {error}", file=sys.stderr)
