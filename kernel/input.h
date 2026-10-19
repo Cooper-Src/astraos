@@ -14,6 +14,7 @@ bool astra_input_read_byte(uint8_t *byte_out);
 
 /* Reserved byte values for UEFI function keys; ASCII input remains unchanged. */
 enum {
+    ASTRA_INPUT_KEY_ESCAPE = 0x1bu,
     ASTRA_INPUT_KEY_F1 = 0xf1u,
     ASTRA_INPUT_KEY_F2 = 0xf2u,
     ASTRA_INPUT_KEY_F3 = 0xf3u
