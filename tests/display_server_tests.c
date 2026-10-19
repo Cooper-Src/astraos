@@ -7,7 +7,7 @@
 #include <stdlib.h>
 
 enum {
-    TEST_WIDTH = 400u,
+    TEST_WIDTH = 500u,
     TEST_HEIGHT = 300u,
     FIRST_X = 20u,
     FIRST_Y = 40u,
@@ -70,13 +70,13 @@ static void test_window_composition_and_lifecycle(void) {
     CHECK(astra_display_server_width() == TEST_WIDTH);
     CHECK(astra_display_server_height() == TEST_HEIGHT);
 
-    CHECK(!astra_display_window_create("invalid", 380u, 0u, 240u, 160u,
+    CHECK(!astra_display_window_create("invalid", 480u, 0u, 240u, 160u,
         render_test_window, NULL, &first_id));
     CHECK(first_id == 0u);
 
     CHECK(astra_display_window_create("First", FIRST_X, FIRST_Y,
         FIRST_WIDTH, FIRST_HEIGHT, render_test_window, NULL, &first_id));
-    CHECK(astra_display_window_create("Second", 180u, 80u, 200u, 150u,
+    CHECK(astra_display_window_create("Second", 280u, 80u, 200u, 150u,
         render_test_window, NULL, &second_id));
     CHECK(first_id != 0u && second_id != 0u && first_id != second_id);
     CHECK(astra_display_server_window_count() == 2u);
