@@ -1,6 +1,7 @@
 #include "boot_info.h"
 #include "acpi.h"
 #include "framebuffer.h"
+#include "display.h"
 #include "fdt.h"
 #include "exceptions.h"
 #include "memory.h"
@@ -739,6 +740,16 @@ void astra_kernel_main(const AstraBootInfo *boot_info) {
         print_result(result);
         for (;;) {
             __asm__ volatile("wfe");
+        }
+    }
+
+    if (boot_info != NULL &&
+        boot_info->magic == ASTRA_BOOT_INFO_MAGIC &&
+        boot_info->version == ASTRA_BOOT_INFO_VERSION &&
+        (boot_info->flags & ASTRA_BOOT_FLAG_DESKTOP_MODE) != 0u) {
+        astra_uart_puts("AstraOS desktop mode requested.\n");
+        if (!astra_display_server_run()) {
+            astra_uart_puts("Desktop session ended after an input or display error.\n");
         }
     }
 
