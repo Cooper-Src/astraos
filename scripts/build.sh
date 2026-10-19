@@ -46,6 +46,8 @@ run_host_test acpi_tests \
 run_host_test platform_tests \
     "$ROOT/tests/platform_tests.c" "$ROOT/kernel/platform.c" \
     "$ROOT/kernel/fdt.c" "$ROOT/kernel/acpi.c" "$ROOT/kernel/mmio.c"
+run_host_test input_tests \
+    "$ROOT/tests/input_tests.c" "$ROOT/kernel/input.c"
 run_host_test framebuffer_tests \
     "$ROOT/tests/framebuffer_tests.c" "$ROOT/kernel/framebuffer.c"
 
@@ -83,6 +85,7 @@ KERNEL_SOURCES=(
     "$ROOT/kernel/memory.c"
     "$ROOT/kernel/mmio.c"
     "$ROOT/kernel/platform.c"
+    "$ROOT/kernel/input.c"
     "$ROOT/kernel/uart.c"
     "$ROOT/kernel/vfs.c"
 )
@@ -141,6 +144,7 @@ create_esp() {
     local output="$1"
     local volume_label="$2"
     local dtb_path="$3"
+    local console_mode="${4:-serial}"
 
     dd if=/dev/zero of="$output" bs=1M count=64 status=none
     mkfs.vfat -F 32 -n "$volume_label" "$output" >/dev/null
@@ -150,6 +154,9 @@ create_esp() {
     mcopy -i "$output" "$BUILD/kernel.bin" ::/kernel.bin
     if [[ -n "$dtb_path" ]]; then
         mcopy -i "$output" "$dtb_path" ::/platform.dtb
+    fi
+    if [[ "$console_mode" == "uefi-keyboard" ]]; then
+        mcopy -i "$output" "$BUILD/keyboard-console.cfg" ::/keyboard-console.cfg
     fi
     mdir -i "$output" ::/ >/dev/null
 }
@@ -172,24 +179,31 @@ create_iso() {
     )
 }
 
-echo "==> Creating generic ARM64 EFI System Partition"
-create_esp "$BUILD/astraos-aarch64-esp.img" "ASTRAOS" ""
+printf '%s\n' 'ASTRAOS_UEFI_KEYBOARD=1' > "$BUILD/keyboard-console.cfg"
 
-echo "==> Creating QEMU test device tree"
+echo "==> Creating generic ARM64 EFI System Partition"
+create_esp "$BUILD/astraos-aarch64-esp.img" "ASTRAOS" "" "uefi-keyboard"
+
+echo "==> Creating QEMU serial test device tree"
 python3 "$ROOT/tests/make_fdt_fixture.py" "$BUILD/platform.dtb"
 
-echo "==> Creating QEMU test EFI System Partition"
+echo "==> Creating QEMU serial EFI System Partition"
 create_esp "$BUILD/astraos-qemu-virt-esp.img" "ASTRAQEMU" "$BUILD/platform.dtb"
+
+echo "==> Creating QEMU keyboard EFI System Partition"
+create_esp "$BUILD/astraos-qemu-keyboard-esp.img" "ASTRAKEYB" "$BUILD/platform.dtb" "uefi-keyboard"
 
 echo "==> Creating UEFI-bootable ARM64 ISO images"
 create_iso "$BUILD/astraos-aarch64.iso" "$BUILD/astraos-aarch64-esp.img" "ASTRAOS"
 create_iso "$BUILD/astraos-qemu-virt.iso" "$BUILD/astraos-qemu-virt-esp.img" "ASTRAQEMU"
+create_iso "$BUILD/astraos-qemu-keyboard.iso" "$BUILD/astraos-qemu-keyboard-esp.img" "ASTRAKEYB"
 
 (
     cd "$BUILD"
     sha256sum \
         astraos-aarch64.iso astraos-aarch64-esp.img \
-        astraos-qemu-virt.iso astraos-qemu-virt-esp.img > SHA256SUMS
+        astraos-qemu-virt.iso astraos-qemu-virt-esp.img \
+        astraos-qemu-keyboard.iso astraos-qemu-keyboard-esp.img > SHA256SUMS
     sha256sum -c SHA256SUMS
 )
 
@@ -197,5 +211,7 @@ echo "Built: $BUILD/astraos-aarch64.iso"
 echo "Built: $BUILD/astraos-aarch64-esp.img"
 echo "Built: $BUILD/astraos-qemu-virt.iso"
 echo "Built: $BUILD/astraos-qemu-virt-esp.img"
+echo "Built: $BUILD/astraos-qemu-keyboard.iso"
+echo "Built: $BUILD/astraos-qemu-keyboard-esp.img"
 echo "Kernel: $BUILD/kernel.elf (ELF), $BUILD/kernel.bin (flat image)"
 echo "Checksums: $BUILD/SHA256SUMS"

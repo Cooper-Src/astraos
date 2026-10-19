@@ -5,12 +5,12 @@
 #include "../../kernel/boot_info.h"
 #include "../../kernel/fdt.h"
 
-typedef unsigned char EFI_UINT8;
-typedef unsigned short EFI_UINT16;
-typedef unsigned int EFI_UINT32;
-typedef unsigned long long EFI_UINT64;
-typedef unsigned long long EFI_UINTN;
-typedef EFI_UINT64 EFI_STATUS;
+typedef uint8_t EFI_UINT8;
+typedef uint16_t EFI_UINT16;
+typedef uint32_t EFI_UINT32;
+typedef uint64_t EFI_UINT64;
+typedef uint64_t EFI_UINTN;
+typedef uint64_t EFI_STATUS;
 typedef void *EFI_HANDLE;
 typedef EFI_UINT16 CHAR16;
 
@@ -68,6 +68,8 @@ struct EFI_SIMPLE_TEXT_OUTPUT_PROTOCOL {
     EFI_STATUS (EFIAPI *OutputString)(EFI_SIMPLE_TEXT_OUTPUT_PROTOCOL *, CHAR16 *);
 };
 
+typedef AstraFirmwareTextInputProtocol EFI_SIMPLE_TEXT_INPUT_PROTOCOL;
+
 typedef struct EFI_BOOT_SERVICES EFI_BOOT_SERVICES;
 typedef struct EFI_FILE_PROTOCOL EFI_FILE_PROTOCOL;
 typedef struct EFI_LOADED_IMAGE_PROTOCOL EFI_LOADED_IMAGE_PROTOCOL;
@@ -106,7 +108,7 @@ struct EFI_BOOT_SERVICES {
     void *FreePool;
     void *CreateEvent;
     void *SetTimer;
-    void *WaitForEvent;
+    AstraFirmwareWaitForEvent WaitForEvent;
     void *SignalEvent;
     void *CloseEvent;
     void *CheckEvent;
@@ -250,6 +252,8 @@ static const EFI_GUID g_acpi10_table_guid = {
 };
 static CHAR16 g_kernel_file_name[] = L"kernel.bin";
 static CHAR16 g_platform_dtb_file_name[] = L"platform.dtb";
+static CHAR16 g_keyboard_console_file_name[] = L"keyboard-console.cfg";
+static EFI_UINT8 g_keyboard_console_marker[64];
 static EFI_UINT8 g_kernel_staging[KERNEL_STAGING_CAP];
 static EFI_UINT64 g_memory_map[MEMORY_MAP_WORDS];
 static AstraBootInfo g_boot_info;
@@ -429,6 +433,95 @@ static EFI_STATUS read_kernel(
         sizeof g_kernel_staging,
         kernel_size_out
     );
+}
+
+/* The marker is included only in images that request firmware-backed keyboard input. */
+static bool keyboard_console_mode_requested(
+    EFI_HANDLE image,
+    EFI_SYSTEM_TABLE *system_table
+) {
+    static const EFI_UINT8 expected[] = "ASTRAOS_UEFI_KEYBOARD=1\n";
+    EFI_STATUS status = EFI_SUCCESS;
+    size_t file_size = 0u;
+
+    status = read_efi_file(
+        image,
+        system_table,
+        g_keyboard_console_file_name,
+        g_keyboard_console_marker,
+        sizeof g_keyboard_console_marker,
+        &file_size
+    );
+    if (status == EFI_NOT_FOUND) {
+        return false;
+    }
+    if (status != EFI_SUCCESS) {
+        loader_out(L"Warning: could not read keyboard-console.cfg.\r\n");
+        return false;
+    }
+    if (file_size != sizeof expected - 1u) {
+        loader_out(L"Warning: keyboard-console.cfg has an invalid size.\r\n");
+        return false;
+    }
+    for (size_t i = 0u; i < file_size; i++) {
+        if (g_keyboard_console_marker[i] != expected[i]) {
+            loader_out(L"Warning: keyboard-console.cfg has invalid contents.\r\n");
+            return false;
+        }
+    }
+    return true;
+}
+
+/*
+ * Captures firmware input and exception state. In this mode, Boot Services stay
+ * active intentionally, and the page allocator remains disabled in the kernel.
+ */
+static bool configure_firmware_keyboard_console(
+    AstraBootInfo *boot_info,
+    EFI_SYSTEM_TABLE *system_table
+) {
+    EFI_SIMPLE_TEXT_INPUT_PROTOCOL *input = NULL;
+    EFI_UINT64 current_el = 0u;
+    EFI_UINT64 daif = 0u;
+    EFI_UINT64 vector = 0u;
+    EFI_UINT64 exception_level = 0u;
+
+    if (boot_info == NULL || system_table == NULL ||
+        system_table->BootServices == NULL ||
+        system_table->BootServices->WaitForEvent == NULL ||
+        system_table->ConIn == NULL) {
+        return false;
+    }
+
+    input = (EFI_SIMPLE_TEXT_INPUT_PROTOCOL *)system_table->ConIn;
+    if (input->read_key_stroke == NULL || input->wait_for_key == NULL) {
+        return false;
+    }
+
+    __asm__ volatile("mrs %0, CurrentEL" : "=r"(current_el));
+    __asm__ volatile("mrs %0, DAIF" : "=r"(daif));
+    exception_level = (current_el >> 2u) & UINT64_C(0x3);
+    if (exception_level == UINT64_C(1)) {
+        __asm__ volatile("mrs %0, VBAR_EL1" : "=r"(vector));
+    } else if (exception_level == UINT64_C(2)) {
+        __asm__ volatile("mrs %0, VBAR_EL2" : "=r"(vector));
+    } else {
+        return false;
+    }
+
+    if (vector == 0u || (vector & UINT64_C(0x7ff)) != 0u) {
+        return false;
+    }
+
+    boot_info->flags = ASTRA_BOOT_FLAG_BOOT_SERVICES_ACTIVE |
+        ASTRA_BOOT_FLAG_UEFI_TEXT_INPUT;
+    boot_info->firmware_input_protocol = (AstraFirmwareTextInputProtocol *)input;
+    boot_info->firmware_wait_for_event = system_table->BootServices->WaitForEvent;
+    boot_info->firmware_exception_level = exception_level;
+    boot_info->firmware_exception_vector = vector;
+    /* UEFI input/timer events need IRQ delivery while firmware vectors are active. */
+    boot_info->firmware_daif = daif & ~(UINT64_C(1) << 7u);
+    return true;
 }
 
 static bool guid_equal(const EFI_GUID *left, const EFI_GUID *right) {
@@ -901,6 +994,7 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *system_table) {
     EFI_UINT32 descriptor_version = 0;
     EFI_BOOT_SERVICES *boot_services = NULL;
     EFI_UINT8 *kernel_destination = NULL;
+    bool keep_boot_services_active = false;
     typedef void (*KernelEntry)(const AstraBootInfo *);
 
     if (system_table == NULL || system_table->BootServices == NULL ||
@@ -971,6 +1065,25 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *system_table) {
     capture_framebuffer(boot_services, &g_boot_info);
     capture_device_tree(image, system_table, &g_boot_info);
     capture_acpi_rsdp(system_table, &g_boot_info);
+    g_boot_info.flags = 0u;
+    g_boot_info.firmware_input_protocol = NULL;
+    g_boot_info.firmware_wait_for_event = NULL;
+    g_boot_info.firmware_exception_level = 0u;
+    g_boot_info.firmware_exception_vector = 0u;
+    g_boot_info.firmware_daif = 0u;
+
+    if (keyboard_console_mode_requested(image, system_table)) {
+        if (configure_firmware_keyboard_console(&g_boot_info, system_table)) {
+            keep_boot_services_active = true;
+            loader_out(
+                L"UEFI keyboard console enabled; firmware services will remain active.\r\n"
+            );
+        } else {
+            loader_out(
+                L"Warning: UEFI keyboard input unavailable; using normal kernel handoff.\r\n"
+            );
+        }
+    }
 
     if (g_boot_info.framebuffer_base != 0) {
         loader_out(L"UEFI GOP framebuffer discovered.\r\n");
@@ -996,6 +1109,11 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *system_table) {
         g_boot_info.memory_descriptor_size = (EFI_UINT64)descriptor_size;
         g_boot_info.memory_descriptor_version = (EFI_UINT64)descriptor_version;
 
+        if (keep_boot_services_active) {
+            status = EFI_SUCCESS;
+            break;
+        }
+
         status = boot_services->ExitBootServices(image, map_key);
         if (status == EFI_SUCCESS) {
             break;
@@ -1009,9 +1127,11 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *system_table) {
         /* A failed ExitBootServices can leave firmware partly shut down. */
         stop_forever();
     }
-    g_boot_services_exited = true;
+    if (!keep_boot_services_active) {
+        g_boot_services_exited = true;
+    }
 
-    /* No UEFI protocol or boot-service call is made after this point. */
+    /* Firmware-backed keyboard mode retains Boot Services by design. */
     {
         KernelEntry entry = (KernelEntry)(uintptr_t)kernel_address;
         entry(&g_boot_info);

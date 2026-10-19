@@ -4,6 +4,7 @@
 #include "fdt.h"
 #include "exceptions.h"
 #include "memory.h"
+#include "input.h"
 #include "uart.h"
 #include "vfs.h"
 
@@ -308,7 +309,8 @@ static void command_dispatch(const char *command, size_t command_len,
             "AstraOS kernel 0.2: freestanding AArch64 kernel.\n"
             "UEFI is used for boot, device discovery, and the memory-map handoff.\n"
             "The console uses a validated FDT or ACPI SPCR PL011 when available.\n"
-            "Framebuffer-only platforms still need a native input driver.\n"
+            "Generic images can use UEFI text input as a keyboard fallback.\n"
+            "Native USB/HID drivers and interrupt support remain incomplete.\n"
         );
     } else if (token_equals(command, command_len, "uname")) {
         astra_uart_puts("AstraOS astra-aarch64 0.2 kernel\n");
@@ -666,22 +668,32 @@ static void print_device_tree_info(const AstraBootInfo *boot_info) {
 void astra_kernel_main(const AstraBootInfo *boot_info) {
     char line[KERNEL_LINE_CAP];
     AstraVfsResult result = ASTRA_VFS_OK;
+    bool serial_ready = false;
+    bool input_ready = false;
 
     astra_framebuffer_init(boot_info);
-    if (!astra_uart_init(boot_info)) {
+    serial_ready = astra_uart_init(boot_info);
+    input_ready = astra_input_initialize(boot_info, serial_ready);
+    if (!input_ready) {
         astra_uart_puts("\nAstraOS kernel 0.2.0 | AArch64 freestanding\n");
         astra_uart_puts(
-            "No supported arm,pl011 UART was found via the validated FDT stdout-path.\n"
+            "No supported PL011 UART or UEFI keyboard input was found.\n"
         );
         astra_uart_puts(
-            "Framebuffer diagnostics are display-only; this platform has no input driver yet.\n"
+            "Framebuffer diagnostics are display-only until an input source is available.\n"
         );
         return;
     }
+
     if (astra_framebuffer_is_active()) {
         astra_uart_puts("GOP framebuffer console active.\n");
     } else {
-        astra_uart_puts("GOP framebuffer console unavailable; serial remains active.\n");
+        astra_uart_puts("GOP framebuffer console unavailable.\n");
+    }
+    if (!serial_ready) {
+        astra_uart_puts(
+            "PL011 serial console unavailable; UEFI firmware keyboard input is active.\n"
+        );
     }
     astra_uart_puts("\n================================\n");
     astra_uart_puts("          ASTRAOS KERNEL\n");
@@ -691,21 +703,31 @@ void astra_kernel_main(const AstraBootInfo *boot_info) {
         boot_info->version == ASTRA_BOOT_INFO_VERSION) {
         AstraMemoryResult memory_result = ASTRA_MEMORY_OK;
 
-        astra_uart_puts("UEFI boot-services handoff completed.\n");
-        astra_uart_puts("Kernel base: ");
-        astra_uart_put_hex(boot_info->kernel_base);
-        astra_uart_puts("\n");
-
         print_device_tree_info(boot_info);
-        memory_result = astra_memory_init(&g_memory, boot_info);
-        if (memory_result == ASTRA_MEMORY_OK) {
-            g_memory_ready = true;
-            astra_uart_puts("Physical page allocator initialized (below 4 GiB).\n");
-        } else {
+        if ((boot_info->flags & ASTRA_BOOT_FLAG_BOOT_SERVICES_ACTIVE) != 0u) {
             g_memory_ready = false;
-            astra_uart_puts("warning: physical page allocator unavailable: ");
-            astra_uart_puts(astra_memory_result_name(memory_result));
+            astra_uart_puts(
+                "UEFI boot services remain active for firmware keyboard input.\n"
+            );
+            astra_uart_puts(
+                "Physical page allocation is disabled while firmware owns conventional RAM.\n"
+            );
+        } else {
+            astra_uart_puts("UEFI boot-services handoff completed.\n");
+            astra_uart_puts("Kernel base: ");
+            astra_uart_put_hex(boot_info->kernel_base);
             astra_uart_puts("\n");
+
+            memory_result = astra_memory_init(&g_memory, boot_info);
+            if (memory_result == ASTRA_MEMORY_OK) {
+                g_memory_ready = true;
+                astra_uart_puts("Physical page allocator initialized (below 4 GiB).\n");
+            } else {
+                g_memory_ready = false;
+                astra_uart_puts("warning: physical page allocator unavailable: ");
+                astra_uart_puts(astra_memory_result_name(memory_result));
+                astra_uart_puts("\n");
+            }
         }
     } else {
         g_memory_ready = false;
@@ -749,7 +771,13 @@ void astra_kernel_main(const AstraBootInfo *boot_info) {
             bool line_too_long = false;
 
             for (;;) {
-                uint8_t input = astra_uart_get_byte();
+                uint8_t input = 0u;
+                if (!astra_input_read_byte(&input)) {
+                    astra_uart_puts("\nerror: console input stopped; halting safely.\n");
+                    for (;;) {
+                        __asm__ volatile("wfe");
+                    }
+                }
                 if (input == (uint8_t)'\r' || input == (uint8_t)'\n') {
                     astra_uart_puts("\n");
                     break;

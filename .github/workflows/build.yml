@@ -39,9 +39,13 @@ jobs:
           test -s build/astraos-aarch64-esp.img
           test -s build/astraos-qemu-virt.iso
           test -s build/astraos-qemu-virt-esp.img
+          test -s build/astraos-qemu-keyboard.iso
+          test -s build/astraos-qemu-keyboard-esp.img
           (cd build && sha256sum -c SHA256SUMS)
           mdir -i build/astraos-qemu-virt-esp.img ::/EFI/BOOT
           mdir -i build/astraos-qemu-virt-esp.img ::/
+          mdir -i build/astraos-aarch64-esp.img ::/keyboard-console.cfg
+          mdir -i build/astraos-qemu-keyboard-esp.img ::/keyboard-console.cfg
 
       - name: Smoke-test kernel boot through UEFI in QEMU
         shell: bash
@@ -87,6 +91,39 @@ jobs:
           fi
           echo "AstraOS kernel booted away from its link address and reached the shell."
 
+      - name: Smoke-test UEFI keyboard input through QEMU
+        shell: bash
+        run: |
+          set -euo pipefail
+          CODE="$(find /usr/share -name 'AAVMF_CODE.fd' -print -quit)"
+          VARS_TEMPLATE="$(find /usr/share -name 'AAVMF_VARS.fd' -print -quit)"
+          if [[ -z "$CODE" || -z "$VARS_TEMPLATE" ]]; then
+            echo "Could not find AArch64 UEFI firmware files." >&2
+            exit 1
+          fi
+          cp "$VARS_TEMPLATE" build/uefi-keyboard-vars.fd
+          rm -f build/qmp-keyboard.sock build/qemu-keyboard-serial.log build/qemu-keyboard-launch.log
+          qemu-system-aarch64 \
+            -machine virt -cpu cortex-a72 -m 1024 \
+            -device ramfb -device qemu-xhci -device usb-kbd \
+            -drive if=pflash,unit=0,format=raw,readonly=on,file="$CODE" \
+            -drive if=pflash,unit=1,format=raw,file=build/uefi-keyboard-vars.fd \
+            -cdrom build/astraos-qemu-keyboard.iso -boot order=d \
+            -display none -serial file:build/qemu-keyboard-serial.log -monitor none \
+            -qmp unix:build/qmp-keyboard.sock,server=on,wait=off \
+            > build/qemu-keyboard-launch.log 2>&1 &
+          QEMU_PID=$!
+          cleanup() {
+            kill "$QEMU_PID" 2>/dev/null || true
+            wait "$QEMU_PID" 2>/dev/null || true
+          }
+          trap cleanup EXIT
+          python3 tests/qemu_keyboard_smoke.py build/qmp-keyboard.sock build/qemu-keyboard-serial.log
+          cleanup
+          trap - EXIT
+          cat build/qemu-keyboard-launch.log
+          cat build/qemu-keyboard-serial.log
+
       - name: Upload live images and diagnostics
         uses: actions/upload-artifact@v4
         with:
@@ -96,11 +133,15 @@ jobs:
             build/astraos-aarch64-esp.img
             build/astraos-qemu-virt.iso
             build/astraos-qemu-virt-esp.img
+            build/astraos-qemu-keyboard.iso
+            build/astraos-qemu-keyboard-esp.img
             build/kernel.elf
             build/kernel.bin
             build/SHA256SUMS
             build/qemu-serial.log
             build/qemu-launch.log
+            build/qemu-keyboard-serial.log
+            build/qemu-keyboard-launch.log
           if-no-files-found: error
           retention-days: 30
 
@@ -117,6 +158,7 @@ jobs:
           gh release upload rolling \
             build/astraos-aarch64.iso build/astraos-aarch64-esp.img \
             build/astraos-qemu-virt.iso build/astraos-qemu-virt-esp.img \
+            build/astraos-qemu-keyboard.iso build/astraos-qemu-keyboard-esp.img \
             build/kernel.elf build/kernel.bin build/SHA256SUMS \
             --repo "$GITHUB_REPOSITORY" --clobber
 
@@ -130,11 +172,12 @@ jobs:
           gh release create "$VERSION" \
             build/astraos-aarch64.iso build/astraos-aarch64-esp.img \
             build/astraos-qemu-virt.iso build/astraos-qemu-virt-esp.img \
+            build/astraos-qemu-keyboard.iso build/astraos-qemu-keyboard-esp.img \
             build/kernel.elf build/kernel.bin build/SHA256SUMS \
             --repo "$GITHUB_REPOSITORY" \
             --target "$TARGET_SHA" \
             --title "AstraOS ${VERSION} — Alpha" \
-            --notes "First official versioned AstraOS alpha release.
+            --notes "Official versioned AstraOS alpha release.
 
           This release packages the freestanding AArch64 kernel and UEFI live images. CI runs sanitizer-backed parser and kernel tests, validates the generated images and checksums, and smoke-tests UEFI boot to the interactive shell in QEMU.
 
