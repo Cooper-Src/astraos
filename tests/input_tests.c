@@ -43,6 +43,36 @@ static void test_ascii_key_translation(void) {
     CHECK(!astra_input_translate_key((uint16_t)'x', NULL));
 }
 
+static void test_firmware_function_key_translation(void) {
+    AstraFirmwareInputKey key = {0};
+    uint8_t byte = 0u;
+
+    key.scan_code = UINT16_C(0x000b);
+    CHECK(astra_input_translate_firmware_key(&key, &byte));
+    CHECK(byte == (uint8_t)ASTRA_INPUT_KEY_F1);
+
+    key.scan_code = UINT16_C(0x000c);
+    CHECK(astra_input_translate_firmware_key(&key, &byte));
+    CHECK(byte == (uint8_t)ASTRA_INPUT_KEY_F2);
+
+    key.scan_code = UINT16_C(0x000d);
+    CHECK(astra_input_translate_firmware_key(&key, &byte));
+    CHECK(byte == (uint8_t)ASTRA_INPUT_KEY_F3);
+
+    key.scan_code = UINT16_C(0x000d);
+    key.unicode_char = (uint16_t)'x';
+    CHECK(astra_input_translate_firmware_key(&key, &byte));
+    CHECK(byte == (uint8_t)'x');
+
+    byte = UINT8_C(0xaa);
+    key.scan_code = UINT16_C(0xffff);
+    key.unicode_char = 0u;
+    CHECK(!astra_input_translate_firmware_key(&key, &byte));
+    CHECK(byte == UINT8_C(0xaa));
+    CHECK(!astra_input_translate_firmware_key(NULL, &byte));
+    CHECK(!astra_input_translate_firmware_key(&key, NULL));
+}
+
 static void test_serial_input_fallback(void) {
     uint8_t byte = 0u;
 
@@ -58,6 +88,7 @@ static void test_serial_input_fallback(void) {
 
 int main(void) {
     test_ascii_key_translation();
+    test_firmware_function_key_translation();
     test_serial_input_fallback();
 
     if (g_failures != 0) {
