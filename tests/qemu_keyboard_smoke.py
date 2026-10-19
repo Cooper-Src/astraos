@@ -22,15 +22,18 @@ class QMPClient:
 
     def __init__(self, socket_path: str) -> None:
         self._socket = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        self._socket.settimeout(QMP_CONNECT_TIMEOUT)
-        self._socket.connect(socket_path)
         self._buffer = bytearray()
         self._next_id = 1
-
-        greeting = self._read_object(time.monotonic() + QMP_COMMAND_TIMEOUT)
-        if "QMP" not in greeting:
-            raise RuntimeError("QEMU did not send a QMP greeting")
-        self.execute("qmp_capabilities")
+        try:
+            self._socket.settimeout(QMP_CONNECT_TIMEOUT)
+            self._socket.connect(socket_path)
+            greeting = self._read_object(time.monotonic() + QMP_COMMAND_TIMEOUT)
+            if "QMP" not in greeting:
+                raise RuntimeError("QEMU did not send a QMP greeting")
+            self.execute("qmp_capabilities")
+        except Exception:
+            self._socket.close()
+            raise
 
     def close(self) -> None:
         self._socket.close()
@@ -115,7 +118,7 @@ def type_command(client: QMPClient, command: str) -> None:
             client.send_key(character)
         else:
             raise ValueError(f"unsupported test-key character: {character!r}")
-        time.sleep(0.035)
+        time.sleep(0.15)
     client.send_key("ret")
 
 
