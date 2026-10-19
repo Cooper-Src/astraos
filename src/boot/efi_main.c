@@ -253,7 +253,9 @@ static const EFI_GUID g_acpi10_table_guid = {
 static CHAR16 g_kernel_file_name[] = L"kernel.bin";
 static CHAR16 g_platform_dtb_file_name[] = L"platform.dtb";
 static CHAR16 g_keyboard_console_file_name[] = L"keyboard-console.cfg";
+static CHAR16 g_desktop_mode_file_name[] = L"desktop-mode.cfg";
 static EFI_UINT8 g_keyboard_console_marker[64];
+static EFI_UINT8 g_desktop_mode_marker[64];
 static EFI_UINT8 g_kernel_staging[KERNEL_STAGING_CAP];
 static EFI_UINT64 g_memory_map[MEMORY_MAP_WORDS];
 static AstraBootInfo g_boot_info;
@@ -466,6 +468,43 @@ static bool keyboard_console_mode_requested(
     for (size_t i = 0u; i < file_size; i++) {
         if (g_keyboard_console_marker[i] != expected[i]) {
             loader_out(L"Warning: keyboard-console.cfg has invalid contents.\r\n");
+            return false;
+        }
+    }
+    return true;
+}
+
+/* The desktop marker opts the image into graphical startup and firmware input. */
+static bool desktop_mode_requested(
+    EFI_HANDLE image,
+    EFI_SYSTEM_TABLE *system_table
+) {
+    static const EFI_UINT8 expected[] = "ASTRAOS_DESKTOP=1\n";
+    EFI_STATUS status = EFI_SUCCESS;
+    size_t file_size = 0u;
+
+    status = read_efi_file(
+        image,
+        system_table,
+        g_desktop_mode_file_name,
+        g_desktop_mode_marker,
+        sizeof g_desktop_mode_marker,
+        &file_size
+    );
+    if (status == EFI_NOT_FOUND) {
+        return false;
+    }
+    if (status != EFI_SUCCESS) {
+        loader_out(L"Warning: could not read desktop-mode.cfg.\r\n");
+        return false;
+    }
+    if (file_size != sizeof expected - 1u) {
+        loader_out(L"Warning: desktop-mode.cfg has an invalid size.\r\n");
+        return false;
+    }
+    for (size_t i = 0u; i < file_size; i++) {
+        if (g_desktop_mode_marker[i] != expected[i]) {
+            loader_out(L"Warning: desktop-mode.cfg has invalid contents.\r\n");
             return false;
         }
     }
@@ -1072,16 +1111,29 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *system_table) {
     g_boot_info.firmware_exception_vector = 0u;
     g_boot_info.firmware_daif = 0u;
 
-    if (keyboard_console_mode_requested(image, system_table)) {
-        if (configure_firmware_keyboard_console(&g_boot_info, system_table)) {
-            keep_boot_services_active = true;
-            loader_out(
-                L"UEFI keyboard console enabled; firmware services will remain active.\r\n"
-            );
-        } else {
-            loader_out(
-                L"Warning: UEFI keyboard input unavailable; using normal kernel handoff.\r\n"
-            );
+    {
+        bool desktop_mode = desktop_mode_requested(image, system_table);
+        bool keyboard_mode = desktop_mode ||
+            keyboard_console_mode_requested(image, system_table);
+
+        if (keyboard_mode) {
+            if (configure_firmware_keyboard_console(&g_boot_info, system_table)) {
+                keep_boot_services_active = true;
+                if (desktop_mode) {
+                    g_boot_info.flags |= ASTRA_BOOT_FLAG_DESKTOP_MODE;
+                    loader_out(
+                        L"Graphical desktop requested; firmware keyboard input enabled.\r\n"
+                    );
+                } else {
+                    loader_out(
+                        L"UEFI keyboard console enabled; firmware services will remain active.\r\n"
+                    );
+                }
+            } else {
+                loader_out(
+                    L"Warning: UEFI keyboard input unavailable; using normal kernel handoff.\r\n"
+                );
+            }
         }
     }
 
