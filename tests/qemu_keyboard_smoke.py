@@ -40,7 +40,7 @@ class QMPClient:
 
     def _read_object(self, deadline: float) -> dict[str, Any]:
         while True:
-            newline = self._buffer.find(b"\\n")
+            newline = self._buffer.find(b"\n")
             if newline >= 0:
                 line = bytes(self._buffer[:newline])
                 del self._buffer[: newline + 1]
@@ -66,7 +66,7 @@ class QMPClient:
         request: dict[str, Any] = {"execute": command, "id": command_id}
         if arguments is not None:
             request["arguments"] = arguments
-        payload = json.dumps(request, separators=(",", ":")).encode("utf-8") + b"\\r\\n"
+        payload = json.dumps(request, separators=(",", ":")).encode("utf-8") + b"\r\n"
         self._socket.sendall(payload)
         deadline = time.monotonic() + QMP_COMMAND_TIMEOUT
 
@@ -104,7 +104,7 @@ def wait_for_log(log_path: Path, needle: str, timeout: float) -> str:
     text = read_log(log_path)
     if needle not in text:
         excerpt = text[-6000:] if text else "(serial log is empty)"
-        raise TimeoutError(f"serial output did not contain {needle!r}. Last output:\\n{excerpt}")
+        raise TimeoutError(f"serial output did not contain {needle!r}. Last output:\n{excerpt}")
     return text
 
 
