@@ -13,8 +13,8 @@ enum {
     DISPLAY_TITLEBAR_HEIGHT = 30u,
     DISPLAY_PANEL_HEIGHT = 36u,
     DISPLAY_DOCK_HEIGHT = 62u,
-    DISPLAY_MIN_WIDTH = 320u,
-    DISPLAY_MIN_HEIGHT = 260u,
+    DISPLAY_MIN_WIDTH = 480u,
+    DISPLAY_MIN_HEIGHT = 360u,
     DISPLAY_MIN_WINDOW_WIDTH = 260u,
     DISPLAY_MIN_WINDOW_HEIGHT = 160u,
     DISPLAY_MAX_WINDOW_WIDTH = 560u,
@@ -22,8 +22,7 @@ enum {
     DISPLAY_TERMINAL_LINE_CAP = 64u,
     DISPLAY_TERMINAL_HISTORY = 6u,
     DISPLAY_TERMINAL_TEXT_CAP = 72u,
-    DISPLAY_TEXT_CELL_WIDTH = 8u,
-    DISPLAY_TEXT_CELL_HEIGHT = 16u
+    DISPLAY_TEXT_CELL_WIDTH = 8u
 };
 
 #define COLOR_DESKTOP       UINT32_C(0x0b1424)
@@ -577,7 +576,6 @@ static void stop_display_server(void) {
 
 bool astra_display_server_run(void) {
     uint8_t key = 0u;
-    bool dimensions_valid = false;
 
     if (!astra_framebuffer_is_active() ||
         !astra_framebuffer_get_dimensions(&g_screen_width, &g_screen_height) ||
@@ -600,11 +598,6 @@ bool astra_display_server_run(void) {
     g_next_z_order = 1u;
     g_terminal_line[0] = '\0';
     terminal_clear_history();
-    dimensions_valid = true;
-    if (!dimensions_valid) {
-        return false;
-    }
-
     astra_framebuffer_set_console_enabled(false);
     open_surface(DISPLAY_APP_WELCOME);
     render_desktop();
