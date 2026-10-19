@@ -145,8 +145,14 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
+      # A versioned build refreshes rolling first. The official release step below
+      # only runs after this upload succeeds, so prerelease and official assets cannot race.
       - name: Publish rolling development prerelease
-        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        if: >-
+          github.event_name != 'pull_request' &&
+          (github.ref == 'refs/heads/main' ||
+           (github.event_name == 'create' && startsWith(github.ref, 'refs/heads/v')) ||
+           (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')))
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
