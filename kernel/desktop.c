@@ -234,8 +234,8 @@ static void terminal_execute(DesktopTerminal *terminal) {
         return;
     }
     command = command_line;
-    command_line[command_end] = '\0';
     args_start = skip_spaces(command_line, length, command_end);
+    command_line[command_end] = '\0';
     args_end = length;
     while (args_end > args_start &&
         (command_line[args_end - 1u] == ' ' || command_line[args_end - 1u] == '\t')) {
