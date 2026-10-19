@@ -374,7 +374,7 @@ static void draw_desktop(void) {
     draw_text_clipped(14u, 8u, "ASTRAOS", 7u, DISPLAY_COLOR_TEXT,
         DISPLAY_COLOR_PANEL);
     if (g_screen_width >= 400u) {
-        draw_text_clipped(g_screen_width - 10u * DISPLAY_CELL_WIDTH - 14u, 8u,
+        draw_text_clipped(g_screen_width - 20u * DISPLAY_CELL_WIDTH - 14u, 8u,
             "AARCH64  |  DESKTOP", 20u, DISPLAY_COLOR_MUTED, DISPLAY_COLOR_PANEL);
     }
 
