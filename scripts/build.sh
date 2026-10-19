@@ -3,13 +3,12 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BUILD="$ROOT/build"
-ISO_ROOT="$BUILD/iso-root"
 OBJ_DIR="$BUILD/obj"
-LIMINE_VERSION="12.9.3"
-LIMINE_SHA256="9f42fe9ea2e84d71056529969b1d5c24ba9a2287ffcc01bcce58b0ef8aa98b1d"
-LIMINE_URL="https://github.com/Limine-Bootloader/Limine/releases/download/v${LIMINE_VERSION}/limine-binary.tar.gz"
+TEST_DIR="$BUILD/tests"
+EFI_APP="$BUILD/EFI/BOOT/BOOTAA64.EFI"
+HOST_CC="${CC:-cc}"
 
-for tool in clang ld.lld xorriso mkfs.vfat mmd mcopy dd curl tar sha256sum file; do
+for tool in "$HOST_CC" clang ld.lld lld-link llvm-objcopy xorriso mkfs.vfat mmd mcopy dd file sha256sum python3 timeout; do
     if ! command -v "$tool" >/dev/null 2>&1; then
         echo "Missing required build tool: $tool" >&2
         exit 1
@@ -17,91 +16,186 @@ for tool in clang ld.lld xorriso mkfs.vfat mmd mcopy dd curl tar sha256sum file;
 done
 
 rm -rf "$BUILD"
-mkdir -p "$OBJ_DIR" "$BUILD/limine" "$ISO_ROOT/boot/limine" "$ISO_ROOT/EFI/BOOT"
+mkdir -p "$OBJ_DIR/kernel" "$OBJ_DIR/boot" "$TEST_DIR" "$BUILD/EFI/BOOT"
 
-echo "==> Testing RAM filesystem with ASan and UBSan"
-cc -std=c17 -g -O0 \
-    -Wall -Wextra -Wpedantic -Wshadow -Wconversion -Wformat=2 \
-    -Wstrict-prototypes -Wmissing-prototypes -Wwrite-strings -Wcast-qual -Wundef -Wvla -Werror \
-    -fsanitize=address,undefined -fno-sanitize-recover=undefined -fno-omit-frame-pointer \
-    -I"$ROOT/include" \
-    "$ROOT/tests/vfs_test.c" "$ROOT/src/kernel/vfs.c" \
-    -o "$BUILD/vfs_test"
-ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=print_stacktrace=1 "$BUILD/vfs_test"
+HOST_FLAGS=(
+    -std=c17 -g -O0
+    -Wall -Wextra -Wpedantic -Wshadow -Wconversion -Wformat=2
+    -Wstrict-prototypes -Wmissing-prototypes -Wwrite-strings -Wcast-qual -Wundef -Wvla -Werror
+    -fsanitize=address,undefined -fno-sanitize-recover=undefined -fno-omit-frame-pointer
+)
+
+run_host_test() {
+    local name="$1"
+    shift
+    echo "==> Running sanitized ${name} tests"
+    "$HOST_CC" "${HOST_FLAGS[@]}" -I"$ROOT/kernel" "$@" -o "$TEST_DIR/$name"
+    ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=print_stacktrace=1 "$TEST_DIR/$name"
+}
+
+run_host_test vfs_tests \
+    "$ROOT/tests/vfs_tests.c" "$ROOT/kernel/vfs.c"
+run_host_test fdt_tests \
+    "$ROOT/tests/fdt_tests.c" "$ROOT/kernel/fdt.c"
+run_host_test memory_tests \
+    "$ROOT/tests/memory_tests.c" "$ROOT/kernel/memory.c"
+run_host_test mmio_tests \
+    "$ROOT/tests/mmio_tests.c" "$ROOT/kernel/mmio.c"
+run_host_test acpi_tests \
+    "$ROOT/tests/acpi_tests.c" "$ROOT/kernel/acpi.c" "$ROOT/kernel/mmio.c"
+run_host_test platform_tests \
+    "$ROOT/tests/platform_tests.c" "$ROOT/kernel/platform.c" \
+    "$ROOT/kernel/fdt.c" "$ROOT/kernel/acpi.c" "$ROOT/kernel/mmio.c"
+run_host_test framebuffer_tests \
+    "$ROOT/tests/framebuffer_tests.c" "$ROOT/kernel/framebuffer.c"
+
+echo "==> Fuzzing FDT parser with ASan and UBSan"
+clang -std=c17 -g -O1 -Wall -Wextra -Wpedantic -Werror \
+    -fsanitize=fuzzer,address,undefined -fno-sanitize-recover=undefined \
+    -fno-omit-frame-pointer -I"$ROOT/kernel" \
+    "$ROOT/tests/fuzz_fdt.c" "$ROOT/kernel/fdt.c" -o "$TEST_DIR/fuzz_fdt"
+mkdir -p "$BUILD/fdt-corpus"
+python3 "$ROOT/tests/make_fdt_fixture.py" "$BUILD/fdt-corpus/seed.dtb"
+"$TEST_DIR/fuzz_fdt" -max_total_time=3 -max_len=65536 -print_final_stats=1 \
+    "$BUILD/fdt-corpus" >"$BUILD/fuzz-fdt.log" 2>&1 || {
+        cat "$BUILD/fuzz-fdt.log" >&2
+        exit 1
+    }
+tail -n 12 "$BUILD/fuzz-fdt.log"
 
 KERNEL_FLAGS=(
     --target=aarch64-none-elf
     -std=c17 -O2 -g
     -ffreestanding -fno-builtin -fno-stack-protector
     -fno-pic -fno-pie -fno-unwind-tables -fno-asynchronous-unwind-tables
-    -ffunction-sections -fdata-sections -mgeneral-regs-only -mcmodel=large
+    -ffunction-sections -fdata-sections -mgeneral-regs-only -mcmodel=small
     -Wall -Wextra -Wpedantic -Wshadow -Wconversion -Wformat=2
     -Wstrict-prototypes -Wmissing-prototypes -Wwrite-strings -Wcast-qual -Wundef -Wvla -Werror
-    -I"$ROOT/include" -I"$ROOT/third_party/limine" -I"$ROOT/third_party" -I"$ROOT/src/kernel"
+    -I"$ROOT/kernel"
 )
 
-SOURCES=(
-    "$ROOT/src/main.c"
-    "$ROOT/src/kernel/console.c"
-    "$ROOT/src/kernel/vfs.c"
-    "$ROOT/src/kernel/memory.c"
-    "$ROOT/src/kernel/shell.c"
+KERNEL_SOURCES=(
+    "$ROOT/kernel/main.c"
+    "$ROOT/kernel/exceptions.c"
+    "$ROOT/kernel/fdt.c"
+    "$ROOT/kernel/acpi.c"
+    "$ROOT/kernel/framebuffer.c"
+    "$ROOT/kernel/memory.c"
+    "$ROOT/kernel/mmio.c"
+    "$ROOT/kernel/platform.c"
+    "$ROOT/kernel/uart.c"
+    "$ROOT/kernel/vfs.c"
 )
-OBJECTS=()
-for source in "${SOURCES[@]}"; do
-    object="$OBJ_DIR/$(basename "${source%.c}").o"
+KERNEL_OBJECTS=()
+for source in "${KERNEL_SOURCES[@]}"; do
+    object="$OBJ_DIR/kernel/$(basename "${source%.c}").o"
     echo "==> Compiling ${source#"$ROOT/"}"
     clang "${KERNEL_FLAGS[@]}" -c "$source" -o "$object"
-    OBJECTS+=("$object")
+    KERNEL_OBJECTS+=("$object")
 done
 
+clang --target=aarch64-none-elf -g -ffreestanding -c \
+    "$ROOT/kernel/entry.S" -o "$OBJ_DIR/kernel/entry_asm.o"
+clang --target=aarch64-none-elf -g -ffreestanding -c \
+    "$ROOT/kernel/exceptions.S" -o "$OBJ_DIR/kernel/exceptions_asm.o"
+KERNEL_OBJECTS+=("$OBJ_DIR/kernel/entry_asm.o" "$OBJ_DIR/kernel/exceptions_asm.o")
+
 echo "==> Linking freestanding AArch64 kernel"
-ld.lld -m aarch64elf -T "$ROOT/linker.ld" --gc-sections -nostdlib \
-    -o "$BUILD/kernel.elf" "${OBJECTS[@]}"
+ld.lld -m aarch64elf -T "$ROOT/kernel/linker.ld" --gc-sections \
+    --no-undefined --fatal-warnings -nostdlib \
+    -o "$BUILD/kernel.elf" "${KERNEL_OBJECTS[@]}"
+llvm-objcopy -O binary "$BUILD/kernel.elf" "$BUILD/kernel.bin"
 file "$BUILD/kernel.elf" | tee "$BUILD/kernel-file.txt"
-grep -Eiq 'ELF 64-bit.*ARM aarch64|ELF 64-bit.*AArch64' "$BUILD/kernel-file.txt" || {
+grep -Eiq 'ELF 64-bit.*(ARM aarch64|AArch64)' "$BUILD/kernel-file.txt" || {
     echo "Kernel output is not an AArch64 ELF executable." >&2
     exit 1
 }
-
-echo "==> Downloading pinned Limine UEFI bootloader"
-curl -fsSL --retry 3 "$LIMINE_URL" -o "$BUILD/limine-binary.tar.gz"
-printf '%s  %s\n' "$LIMINE_SHA256" "$BUILD/limine-binary.tar.gz" | sha256sum -c -
-tar -xzf "$BUILD/limine-binary.tar.gz" -C "$BUILD/limine"
-
-LIMINE_EFI="$(find "$BUILD/limine" -name BOOTAA64.EFI -type f -print -quit)"
-LIMINE_CD="$(find "$BUILD/limine" -name limine-uefi-cd.bin -type f -print -quit)"
-if [[ -z "$LIMINE_EFI" || -z "$LIMINE_CD" ]]; then
-    echo "Pinned Limine archive is missing its AArch64 UEFI boot files." >&2
+test -s "$BUILD/kernel.bin"
+test "$(stat -c '%s' "$BUILD/kernel.bin")" -le 1048576 || {
+    echo "Flat kernel image exceeds the loader's 1 MiB staging buffer." >&2
     exit 1
-fi
+}
 
-cp "$BUILD/kernel.elf" "$ISO_ROOT/boot/kernel.elf"
-cp "$ROOT/limine.conf" "$ISO_ROOT/limine.conf"
-cp "$LIMINE_CD" "$ISO_ROOT/boot/limine/limine-uefi-cd.bin"
-cp "$LIMINE_EFI" "$ISO_ROOT/EFI/BOOT/BOOTAA64.EFI"
+EFI_FLAGS=(
+    --target=aarch64-pc-windows-msvc
+    -std=c17 -O2 -g
+    -ffreestanding -fshort-wchar -fno-builtin -fno-stack-protector
+    -fno-pic -fno-pie
+    -Wall -Wextra -Wpedantic -Wshadow -Wconversion -Wformat=2
+    -Wstrict-prototypes -Wmissing-prototypes -Wwrite-strings -Wcast-qual -Wundef -Wvla -Werror
+    -I"$ROOT/kernel"
+)
 
-echo "==> Creating hybrid UEFI ARM64 ISO"
-xorriso -as mkisofs -R -r -J -V ASTRAOS \
-    --efi-boot boot/limine/limine-uefi-cd.bin \
-    -efi-boot-part --efi-boot-image --protective-msdos-label \
-    "$ISO_ROOT" -o "$BUILD/astraos-aarch64.iso"
+echo "==> Compiling native AArch64 UEFI loader"
+clang "${EFI_FLAGS[@]}" -c "$ROOT/src/boot/efi_main.c" -o "$OBJ_DIR/boot/efi_main.obj"
+clang "${EFI_FLAGS[@]}" -c "$ROOT/kernel/fdt.c" -o "$OBJ_DIR/boot/fdt.obj"
+lld-link /subsystem:efi_application /entry:efi_main /machine:arm64 /nodefaultlib \
+    /out:"$EFI_APP" "$OBJ_DIR/boot/efi_main.obj" "$OBJ_DIR/boot/fdt.obj"
+file "$EFI_APP" | tee "$BUILD/efi-file.txt"
+grep -Eiq 'PE32\+ executable.*(Aarch64|ARM64)' "$BUILD/efi-file.txt" || {
+    echo "Loader output is not an AArch64 EFI application." >&2
+    exit 1
+}
 
-echo "==> Creating a raw FAT EFI system partition image"
-dd if=/dev/zero of="$BUILD/astraos-aarch64-esp.img" bs=1M count=64 status=none
-mkfs.vfat -F 32 -n ASTRAOS "$BUILD/astraos-aarch64-esp.img" >/dev/null
-mmd -i "$BUILD/astraos-aarch64-esp.img" ::/EFI
-mmd -i "$BUILD/astraos-aarch64-esp.img" ::/EFI/BOOT
-mmd -i "$BUILD/astraos-aarch64-esp.img" ::/boot
-mcopy -i "$BUILD/astraos-aarch64-esp.img" "$LIMINE_EFI" ::/EFI/BOOT/BOOTAA64.EFI
-mcopy -i "$BUILD/astraos-aarch64-esp.img" "$BUILD/kernel.elf" ::/boot/kernel.elf
-mcopy -i "$BUILD/astraos-aarch64-esp.img" "$ROOT/limine.conf" ::/limine.conf
+create_esp() {
+    local output="$1"
+    local volume_label="$2"
+    local dtb_path="$3"
+
+    dd if=/dev/zero of="$output" bs=1M count=64 status=none
+    mkfs.vfat -F 32 -n "$volume_label" "$output" >/dev/null
+    mmd -i "$output" ::/EFI
+    mmd -i "$output" ::/EFI/BOOT
+    mcopy -i "$output" "$EFI_APP" ::/EFI/BOOT/BOOTAA64.EFI
+    mcopy -i "$output" "$BUILD/kernel.bin" ::/kernel.bin
+    if [[ -n "$dtb_path" ]]; then
+        mcopy -i "$output" "$dtb_path" ::/platform.dtb
+    fi
+    mdir -i "$output" ::/ >/dev/null
+}
+
+create_iso() {
+    local output="$1"
+    local esp_image="$2"
+    local volume_label="$3"
+    local staging="$BUILD/stage-$(basename "${output%.iso}")"
+
+    mkdir -p "$staging"
+    cp "$esp_image" "$staging/efiboot.img"
+    cp "$ROOT/README.md" "$staging/README.md"
+    (
+        cd "$staging"
+        xorriso -as mkisofs -r -J -V "$volume_label" \
+            -o "$output" \
+            -e efiboot.img -no-emul-boot \
+            -append_partition 2 0xef efiboot.img .
+    )
+}
+
+echo "==> Creating generic ARM64 EFI System Partition"
+create_esp "$BUILD/astraos-aarch64-esp.img" "ASTRAOS" ""
+
+echo "==> Creating QEMU test device tree"
+python3 "$ROOT/tests/make_fdt_fixture.py" "$BUILD/platform.dtb"
+
+echo "==> Creating QEMU test EFI System Partition"
+create_esp "$BUILD/astraos-qemu-virt-esp.img" "ASTRAQEMU" "$BUILD/platform.dtb"
+
+echo "==> Creating UEFI-bootable ARM64 ISO images"
+create_iso "$BUILD/astraos-aarch64.iso" "$BUILD/astraos-aarch64-esp.img" "ASTRAOS"
+create_iso "$BUILD/astraos-qemu-virt.iso" "$BUILD/astraos-qemu-virt-esp.img" "ASTRAQEMU"
 
 (
     cd "$BUILD"
-    sha256sum astraos-aarch64.iso astraos-aarch64-esp.img > SHA256SUMS
+    sha256sum \
+        astraos-aarch64.iso astraos-aarch64-esp.img \
+        astraos-qemu-virt.iso astraos-qemu-virt-esp.img > SHA256SUMS
+    sha256sum -c SHA256SUMS
 )
 
 echo "Built: $BUILD/astraos-aarch64.iso"
 echo "Built: $BUILD/astraos-aarch64-esp.img"
+echo "Built: $BUILD/astraos-qemu-virt.iso"
+echo "Built: $BUILD/astraos-qemu-virt-esp.img"
+echo "Kernel: $BUILD/kernel.elf (ELF), $BUILD/kernel.bin (flat image)"
 echo "Checksums: $BUILD/SHA256SUMS"

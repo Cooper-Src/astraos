@@ -21,13 +21,13 @@ AstraOS is an experimental from-scratch ARM64 operating-system project. The curr
 On Debian/Ubuntu, install the dependencies:
 
     sudo apt update
-    sudo apt install clang lld xorriso dosfstools mtools qemu-system-arm qemu-efi-aarch64 file python3
+    sudo apt install clang llvm lld xorriso dosfstools mtools qemu-system-arm qemu-efi-aarch64 file python3
 
 Build from the repository root:
 
     bash ./scripts/build.sh
 
-The build uses strict compiler warnings and rejects undefined kernel symbols. CI also requires a QEMU boot with the kernel loaded away from its link address. Outputs are:
+The build runs the VFS, FDT, physical-memory, MMIO, ACPI, platform, and framebuffer test suites with AddressSanitizer and UndefinedBehaviorSanitizer, then runs a bounded libFuzzer session against the FDT parser. The kernel and UEFI loader compile with strict C17/freestanding warnings treated as errors. CI also requires a QEMU UEFI boot with the kernel loaded away from its link address. Outputs are:
 
 - `build/astraos-aarch64.iso` — UEFI-bootable optical-disc image.
 - `build/astraos-aarch64-esp.img` — generic FAT EFI system partition image.
@@ -38,7 +38,7 @@ The build uses strict compiler warnings and rejects undefined kernel symbols. CI
 
 ## Boot and interact in QEMU
 
-Install QEMU ARM64 and an AArch64 UEFI firmware package (for example, `qemu-efi-aarch64`). Use `astraos-qemu-virt.iso` for interactive QEMU testing; it includes a test-only DTB that identifies QEMU's PL011 UART. With a graphical display, run:
+Install QEMU ARM64 and an AArch64 UEFI firmware package (for example, `qemu-efi-aarch64`). Use `astraos-qemu-virt.iso` for interactive QEMU testing; it includes a test-only DTB that identifies QEMU's PL011 UART. The generic image omits that fixture and prefers the device tree or ACPI description provided by the target firmware. With a graphical display, run:
 
     CODE="$(find /usr/share -name AAVMF_CODE.fd -print -quit)"
     VARS_TEMPLATE="$(find /usr/share -name AAVMF_VARS.fd -print -quit)"

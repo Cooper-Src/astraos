@@ -669,7 +669,7 @@ void astra_kernel_main(const AstraBootInfo *boot_info) {
 
     astra_framebuffer_init(boot_info);
     if (!astra_uart_init(boot_info)) {
-        astra_uart_puts("\nAstraOS kernel 0.2 | AArch64 freestanding\n");
+        astra_uart_puts("\nAstraOS kernel 0.2.0 | AArch64 freestanding\n");
         astra_uart_puts(
             "No supported arm,pl011 UART was found via the validated FDT stdout-path.\n"
         );
@@ -686,7 +686,7 @@ void astra_kernel_main(const AstraBootInfo *boot_info) {
     astra_uart_puts("\n================================\n");
     astra_uart_puts("          ASTRAOS KERNEL\n");
     astra_uart_puts("================================\n");
-    astra_uart_puts("AstraOS kernel 0.2 | AArch64 freestanding\n");
+    astra_uart_puts("AstraOS kernel 0.2.0 | AArch64 freestanding\n");
     if (boot_info != NULL && boot_info->magic == ASTRA_BOOT_INFO_MAGIC &&
         boot_info->version == ASTRA_BOOT_INFO_VERSION) {
         AstraMemoryResult memory_result = ASTRA_MEMORY_OK;
