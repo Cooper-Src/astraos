@@ -192,6 +192,31 @@ bool astra_input_translate_key(uint16_t unicode_char, uint8_t *byte_out) {
     return true;
 }
 
+bool astra_input_translate_firmware_key(
+    const AstraFirmwareInputKey *key,
+    uint8_t *byte_out
+) {
+    if (key == NULL || byte_out == NULL) {
+        return false;
+    }
+    if (astra_input_translate_key(key->unicode_char, byte_out)) {
+        return true;
+    }
+    switch (key->scan_code) {
+        case UINT16_C(0x000b):
+            *byte_out = (uint8_t)ASTRA_INPUT_KEY_F1;
+            return true;
+        case UINT16_C(0x000c):
+            *byte_out = (uint8_t)ASTRA_INPUT_KEY_F2;
+            return true;
+        case UINT16_C(0x000d):
+            *byte_out = (uint8_t)ASTRA_INPUT_KEY_F3;
+            return true;
+        default:
+            return false;
+    }
+}
+
 bool astra_input_initialize(const AstraBootInfo *boot_info, bool serial_ready) {
     g_use_serial_input = false;
     g_firmware_input = NULL;
@@ -257,7 +282,7 @@ bool astra_input_read_byte(uint8_t *byte_out) {
         uint64_t status = firmware_read_key(&key);
 
         if (status == ASTRA_INPUT_EFI_SUCCESS) {
-            if (astra_input_translate_key(key.unicode_char, byte_out)) {
+            if (astra_input_translate_firmware_key(&key, byte_out)) {
                 return true;
             }
             continue;
