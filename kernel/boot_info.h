@@ -4,8 +4,40 @@
 #include <stdint.h>
 
 #define ASTRA_BOOT_INFO_MAGIC UINT64_C(0x4153545241424f4f)
-#define ASTRA_BOOT_INFO_VERSION UINT64_C(4)
+#define ASTRA_BOOT_INFO_VERSION UINT64_C(5)
 #define ASTRA_BOOT_MEMORY_MAP_CAP_BYTES (UINT64_C(16384) * UINT64_C(8))
+
+#define ASTRA_BOOT_FLAG_BOOT_SERVICES_ACTIVE (UINT64_C(1) << 0u)
+#define ASTRA_BOOT_FLAG_UEFI_TEXT_INPUT (UINT64_C(1) << 1u)
+
+typedef struct AstraFirmwareInputKey {
+    uint16_t scan_code;
+    uint16_t unicode_char;
+} AstraFirmwareInputKey;
+
+typedef struct AstraFirmwareTextInputProtocol AstraFirmwareTextInputProtocol;
+
+typedef uint64_t (*AstraFirmwareInputReset)(
+    AstraFirmwareTextInputProtocol *protocol,
+    uint8_t extended_verification
+);
+typedef uint64_t (*AstraFirmwareReadKeyStroke)(
+    AstraFirmwareTextInputProtocol *protocol,
+    AstraFirmwareInputKey *key_out
+);
+
+struct AstraFirmwareTextInputProtocol {
+    AstraFirmwareInputReset reset;
+    AstraFirmwareReadKeyStroke read_key_stroke;
+    void *wait_for_key;
+};
+
+/* UEFI WaitForEvent ABI; valid only while the boot services are active. */
+typedef uint64_t (*AstraFirmwareWaitForEvent)(
+    uint64_t event_count,
+    void **events,
+    uint64_t *index_out
+);
 
 typedef struct AstraBootInfo {
     uint64_t magic;
@@ -30,6 +62,14 @@ typedef struct AstraBootInfo {
     uint64_t device_tree_base;
     uint64_t device_tree_size;
     uint64_t acpi_rsdp_base;
+
+    /* Firmware entry points are borrowed, never owned by the kernel. */
+    uint64_t flags;
+    AstraFirmwareTextInputProtocol *firmware_input_protocol;
+    AstraFirmwareWaitForEvent firmware_wait_for_event;
+    uint64_t firmware_exception_level;
+    uint64_t firmware_exception_vector;
+    uint64_t firmware_daif;
 } AstraBootInfo;
 
 /* Called by the AArch64 entry assembly after the stack is installed. */
