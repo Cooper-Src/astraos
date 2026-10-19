@@ -253,7 +253,7 @@ bool astra_input_read_byte(uint8_t *byte_out) {
         AstraFirmwareInputKey key = {0};
         uint64_t status = firmware_read_key(&key);
 
-        if (status == ASTRA_INPUT_EFI_EFI_SUCCESS) {
+        if (status == ASTRA_INPUT_EFI_SUCCESS) {
             if (astra_input_translate_key(key.unicode_char, byte_out)) {
                 return true;
             }
