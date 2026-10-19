@@ -5,6 +5,7 @@
 #include "exceptions.h"
 #include "memory.h"
 #include "input.h"
+#include "desktop.h"
 #include "uart.h"
 #include "vfs.h"
 
@@ -301,7 +302,8 @@ static void command_dispatch(const char *command, size_t command_len,
             "  palloc, pfree HEX_ADDRESS, clear, halt, exception-test\n"
             "  pwd, ls [PATH], cd PATH, cat PATH\n"
             "  touch PATH, mkdir PATH, write PATH TEXT, rm PATH\n"
-            "  chmod OCTAL PATH, whoami, id, su astra\n"
+            "  chmod OCTAL PATH, whoami, id, su astra, desktop\n"
+            "Use the desktop command for the GOP graphical environment.\n"
             "Files live in RAM and reset at reboot.\n"
         );
     } else if (token_equals(command, command_len, "about")) {
