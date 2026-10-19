@@ -30,6 +30,7 @@ typedef struct AstraFramebufferState {
     uint32_t cursor_y;
     uint8_t escape_state;
     bool active;
+    bool console_enabled;
 } AstraFramebufferState;
 
 static AstraFramebufferState g_fb;
@@ -263,6 +264,69 @@ static void fill_rect(
     }
 }
 
+void astra_framebuffer_set_console_enabled(bool enabled) {
+    g_fb.console_enabled = enabled;
+}
+
+uint32_t astra_framebuffer_width(void) {
+    return g_fb.active ? g_fb.width : 0u;
+}
+
+uint32_t astra_framebuffer_height(void) {
+    return g_fb.active ? g_fb.height : 0u;
+}
+
+void astra_framebuffer_fill_rgb(uint32_t x, uint32_t y, uint32_t width,
+    uint32_t height, uint32_t rgb) {
+    uint32_t color = 0u;
+
+    if (!g_fb.active || width == 0u || height == 0u ||
+        x >= g_fb.width || y >= g_fb.height) {
+        return;
+    }
+    if (width > g_fb.width - x) {
+        width = g_fb.width - x;
+    }
+    if (height > g_fb.height - y) {
+        height = g_fb.height - y;
+    }
+    color = color_pixel((uint8_t)(rgb >> 16u),
+        (uint8_t)(rgb >> 8u), (uint8_t)rgb);
+    fill_rect(x, y, width, height, color);
+}
+
+void astra_framebuffer_draw_text(uint32_t x, uint32_t y, const char *text,
+    uint32_t foreground_rgb, uint32_t background_rgb) {
+    uint32_t foreground = 0u;
+    uint32_t background = 0u;
+    uint32_t max_cells = 0u;
+
+    if (!g_fb.active || text == NULL || x >= g_fb.width || y >= g_fb.height ||
+        y > g_fb.height - FB_CELL_HEIGHT) {
+        return;
+    }
+    max_cells = (g_fb.width - x) / FB_CELL_WIDTH;
+    foreground = color_pixel((uint8_t)(foreground_rgb >> 16u),
+        (uint8_t)(foreground_rgb >> 8u), (uint8_t)foreground_rgb);
+    background = color_pixel((uint8_t)(background_rgb >> 16u),
+        (uint8_t)(background_rgb >> 8u), (uint8_t)background_rgb);
+
+    for (uint32_t i = 0u; i < max_cells && text[i] != '\\0'; i++) {
+        uint32_t cell_x = x + i * FB_CELL_WIDTH;
+        fill_rect(cell_x, y, FB_CELL_WIDTH, FB_CELL_HEIGHT, background);
+        for (uint32_t row = 0u; row < FB_FONT_HEIGHT; row++) {
+            uint8_t bits = glyph_row((uint8_t)text[i], row);
+            for (uint32_t column = 0u; column < FB_FONT_WIDTH; column++) {
+                uint8_t bit = (uint8_t)(1u << (FB_FONT_WIDTH - 1u - column));
+                if ((bits & bit) != 0u) {
+                    fill_rect(cell_x + 1u + column, y + 1u + row * 2u,
+                        1u, 2u, foreground);
+                }
+            }
+        }
+    }
+}
+
 bool astra_framebuffer_is_active(void) {
     return g_fb.active;
 }
@@ -376,7 +440,7 @@ static void handle_escape(uint8_t value) {
 }
 
 void astra_framebuffer_put_byte(uint8_t value) {
-    if (!g_fb.active) {
+    if (!g_fb.active || !g_fb.console_enabled) {
         return;
     }
     if (g_fb.escape_state != 0u) {
@@ -433,6 +497,7 @@ void astra_framebuffer_init(const AstraBootInfo *boot_info) {
     g_fb.cursor_y = 0u;
     g_fb.escape_state = 0u;
     g_fb.active = false;
+    g_fb.console_enabled = true;
 
     if (boot_info == NULL || boot_info->magic != ASTRA_BOOT_INFO_MAGIC ||
         boot_info->version != ASTRA_BOOT_INFO_VERSION ||
