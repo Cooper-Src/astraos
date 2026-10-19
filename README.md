@@ -2,7 +2,7 @@
 
 AstraOS is an experimental from-scratch ARM64 operating-system project. The current development target is **AArch64 UEFI on QEMU's `virt` machine**. The boot image contains a small UEFI loader and a separately linked freestanding kernel.
 
-> **Alpha status:** AstraOS has its own AArch64 kernel entry, UEFI `ExitBootServices` handoff, aligned EL1/EL2 exception vectors with fatal exception diagnostics, fixed-size RAM filesystem, physical page allocator, serial console, and optional UEFI GOP framebuffer text console. It is not yet a general-purpose or secure multi-user OS. Serial discovery prefers a validated FDT `/chosen/stdout-path` and `/aliases`; if no supported FDT PL011 is found, the kernel validates the UEFI ACPI RSDP, root-table and SPCR checksums and accepts only a memory-mapped ARM PL011 description. The ACPI SPCR path preserves the firmware-configured baud divisor because SPCR does not describe the UART input clock. Other UART types and nested FDT bus `ranges` are not supported. Without a supported serial console, the kernel shows framebuffer-only diagnostics; framebuffer output does not provide keyboard input. Native USB/HID input, timers, interrupt controllers, persistent storage and device drivers remain incomplete. Do not install AstraOS over your existing OS or use it to protect data.
+> **Alpha status:** AstraOS has its own AArch64 kernel entry, UEFI `ExitBootServices` handoff, aligned EL1/EL2 exception vectors with fatal exception diagnostics, fixed-size RAM filesystem, physical page allocator, serial console, and optional UEFI GOP framebuffer text console. It is not yet a general-purpose or secure multi-user OS. Serial discovery prefers a validated FDT `/chosen/stdout-path` and `/aliases`; if no supported FDT PL011 is found, the kernel validates the UEFI ACPI RSDP, root-table and SPCR checksums and accepts only a memory-mapped ARM PL011 description. The ACPI SPCR path preserves the firmware-configured baud divisor because SPCR does not describe the UART input clock. Other UART types and nested FDT bus `ranges` are not supported. The generic live image includes a UEFI keyboard compatibility path: when `keyboard-console.cfg` is present, the loader passes UEFI Simple Text Input and `WaitForEvent` to the kernel and deliberately retains Boot Services so firmware can keep handling keyboard events. This depends on working firmware text input and is not a native USB/HID driver. The compatibility path disables AstraOS's physical page allocator while firmware remains active, so it has less memory-management functionality than the normal serial path. Images without a supported input source still fall back to display-only diagnostics. Native USB/HID, timers, interrupt controllers, persistent storage and many device drivers remain incomplete. Do not install AstraOS over your existing OS or use it to protect data.
 
 ## Current architecture
 
@@ -31,8 +31,10 @@ The build runs the VFS, FDT, physical-memory, MMIO, ACPI, platform, and framebuf
 
 - `build/astraos-aarch64.iso` — UEFI-bootable optical-disc image.
 - `build/astraos-aarch64-esp.img` — generic FAT EFI system partition image.
-- `build/astraos-qemu-virt.iso` — interactive QEMU `virt` image with a QEMU-only test device tree in its EFI partition.
-- `build/astraos-qemu-virt-esp.img` — matching QEMU test ESP image.
+- `build/astraos-qemu-virt.iso` — QEMU `virt` image with a test device tree and the normal PL011/ExitBootServices path.
+- `build/astraos-qemu-virt-esp.img` — matching QEMU serial-test ESP image.
+- `build/astraos-qemu-keyboard.iso` — QEMU `virt` image with a test device tree and the UEFI keyboard compatibility path.
+- `build/astraos-qemu-keyboard-esp.img` — matching QEMU keyboard-test ESP image.
 - `build/kernel.elf` and `build/kernel.bin` — kernel debug and flat images.
 - `build/SHA256SUMS` — portable SHA-256 checksums. Verify them with `cd build && sha256sum -c SHA256SUMS`.
 
@@ -51,7 +53,9 @@ Install QEMU ARM64 and an AArch64 UEFI firmware package (for example, `qemu-efi-
       -cdrom build/astraos-qemu-virt.iso -boot order=d \
       -display default -serial stdio -monitor none
 
-The kernel draws to the framebuffer when UEFI supplies a supported GOP mode and also mirrors text to serial. **Type commands in the terminal running QEMU**, because input still comes from the emulated PL011 UART; a framebuffer window is output only.
+The kernel draws to the framebuffer when UEFI supplies a supported GOP mode and also mirrors text to serial. In this image, **type commands in the terminal running QEMU**, because input comes from the emulated PL011 UART.
+
+To test the UEFI keyboard compatibility path, use `build/astraos-qemu-keyboard.iso` with a graphical QEMU display and a USB keyboard. The loader reads `keyboard-console.cfg` from the EFI partition to opt in to firmware input. This lets UEFI continue servicing keyboard events after the kernel starts; it is a compatibility layer, not native USB/HID support. If firmware does not expose working text input, the kernel will still fall back to display-only diagnostics.
 
 To use a headless serial-only session, replace `-display default` with `-display none`. Commands include:
 
@@ -85,11 +89,11 @@ To use a headless serial-only session, replace `-display default` with `-display
 
 The kernel is freestanding, but not hardened for multi-user use. UID and mode checks are enforced inside one address space and can be bypassed by kernel code. No process isolation, syscall boundary, scheduler, or credentials store exist yet.
 
-The GOP console uses firmware-provided linear framebuffer metadata after `ExitBootServices`; it does not call firmware services while the kernel runs. The `platform` command reports validated device-tree properties and a supported ACPI SPCR PL011 base when one is present. Device enumeration and initialization beyond the console UART are not implemented yet. Real hardware still needs native input (including USB HID), timers, interrupt controllers, memory-mapping work and platform-specific drivers. A successful QEMU boot is not proof of a successful boot on a laptop or phone.
+The normal serial image uses GOP framebuffer metadata after `ExitBootServices` and does not call firmware services while the kernel runs. The opt-in keyboard image is different: it deliberately retains UEFI Boot Services and temporarily restores firmware exception handling while waiting for keys. Its page allocator is disabled because the firmware still owns conventional memory. The `platform` command reports validated device-tree properties and a supported ACPI SPCR PL011 base when one is present. Native USB/HID, timers, interrupt controllers, memory-mapping work and platform-specific drivers are still needed for a self-contained OS input stack. A successful QEMU boot is not proof of a successful boot on a laptop or phone.
 
 ## Roadmap
 
-1. Validate GOP framebuffer output and physical-page allocator handoff across UEFI configurations, then add a platform-neutral input layer.
+1. Validate GOP framebuffer output and the UEFI keyboard fallback across firmware implementations; then connect it to a platform-neutral input layer for native drivers.
 2. Exception vectors and fatal diagnostics are implemented and QEMU-tested; add a real timer/interrupt controller path, page-table management, and user/kernel isolation.
 3. Add storage discovery and a persistent filesystem with crash/error tests.
 4. Implement USB host-controller and HID support. Android USB tethering comes later and requires USB enumeration, CDC-ECM/NCM/RNDIS support, and a network stack.
