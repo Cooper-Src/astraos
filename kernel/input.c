@@ -203,6 +203,9 @@ bool astra_input_translate_firmware_key(
         return true;
     }
     switch (key->scan_code) {
+        case UINT16_C(0x0017):
+            *byte_out = (uint8_t)ASTRA_INPUT_KEY_ESCAPE;
+            return true;
         case UINT16_C(0x000b):
             *byte_out = (uint8_t)ASTRA_INPUT_KEY_F1;
             return true;
