@@ -128,10 +128,12 @@ void astra_desktop_run(void) {
             (void)astra_display_window_set_visible(g_welcome_window, true);
             (void)astra_display_window_raise(g_welcome_window);
             astra_display_server_present();
+            astra_uart_puts("[desktop] focused Welcome window.\n");
         } else if (key == (uint8_t)'2') {
             (void)astra_display_window_set_visible(g_system_window, true);
             (void)astra_display_window_raise(g_system_window);
             astra_display_server_present();
+            astra_uart_puts("[desktop] focused System Information window.\n");
         } else if (key == (uint8_t)'h' || key == (uint8_t)'H') {
             (void)astra_display_window_set_visible(g_welcome_window, true);
             (void)astra_display_window_set_visible(g_system_window, true);
