@@ -68,17 +68,6 @@ static bool text_equals(const char *left, const char *right) {
     return left[i] == '\0' && right[i] == '\0';
 }
 
-static bool span_equals_text(const char *span, size_t span_length, const char *text) {
-    size_t i = 0u;
-    if (span == NULL || text == NULL) {
-        return false;
-    }
-    while (i < span_length && text[i] != '\0' && span[i] == text[i]) {
-        i++;
-    }
-    return i == span_length && text[i] == '\0';
-}
-
 static size_t skip_spaces(const char *text, size_t length, size_t position) {
     while (position < length && (text[position] == ' ' || text[position] == '\t')) {
         position++;
@@ -630,7 +619,7 @@ bool astra_desktop_run(AstraVfs *filesystem) {
             astra_uart_puts("AstraOS desktop input stopped.\n");
             break;
         }
-        if (key == 0x1bu) {
+        if (key == (uint8_t)ASTRA_INPUT_KEY_ESCAPE) {
             running = false;
             continue;
         }
