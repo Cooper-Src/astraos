@@ -31,6 +31,7 @@ bool astra_display_window_set_visible(uint32_t window_id, bool visible);
 bool astra_display_window_raise(uint32_t window_id);
 bool astra_display_window_close(uint32_t window_id);
 void astra_display_server_present(void);
+void astra_display_server_shutdown(void);
 
 /* Drawing calls are clipped to the content area of the window being rendered. */
 void astra_display_draw_rect(
