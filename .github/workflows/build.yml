@@ -200,6 +200,7 @@ jobs:
           # Prereleases cannot be marked as GitHub's "latest" release. Recreate
           # rolling after all tests pass so its published date and tag track this
           # tested build, keeping it at the top of the Releases list.
+          TARGET_SHA="$(git rev-parse HEAD)"
           if gh release view rolling --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             gh release delete rolling --repo "$GITHUB_REPOSITORY" --cleanup-tag --yes
           fi
@@ -210,7 +211,7 @@ jobs:
             build/astraos-qemu-desktop.iso build/astraos-qemu-desktop-esp.img \
             build/kernel.elf build/kernel.bin build/SHA256SUMS \
             --repo "$GITHUB_REPOSITORY" \
-            --target "$GITHUB_SHA" \
+            --target "$TARGET_SHA" \
             --title "AstraOS ARM64 Live (latest CI build)" \
             --notes "Automatically built development images. Not a stable release." \
             --prerelease
