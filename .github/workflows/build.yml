@@ -197,18 +197,23 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release view rolling --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 || \
-            gh release create rolling --repo "$GITHUB_REPOSITORY" \
-              --title "AstraOS ARM64 Live (latest CI build)" \
-              --notes "Automatically built development images. Not a stable release." \
-              --prerelease
-          gh release upload rolling \
+          # Prereleases cannot be marked as GitHub's "latest" release. Recreate
+          # rolling after all tests pass so its published date and tag track this
+          # tested build, keeping it at the top of the Releases list.
+          if gh release view rolling --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release delete rolling --repo "$GITHUB_REPOSITORY" --cleanup-tag --yes
+          fi
+          gh release create rolling \
             build/astraos-aarch64.iso build/astraos-aarch64-esp.img \
             build/astraos-qemu-virt.iso build/astraos-qemu-virt-esp.img \
             build/astraos-qemu-keyboard.iso build/astraos-qemu-keyboard-esp.img \
             build/astraos-qemu-desktop.iso build/astraos-qemu-desktop-esp.img \
             build/kernel.elf build/kernel.bin build/SHA256SUMS \
-            --repo "$GITHUB_REPOSITORY" --clobber
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "AstraOS ARM64 Live (latest CI build)" \
+            --notes "Automatically built development images. Not a stable release." \
+            --prerelease
 
       - name: Publish official versioned alpha release
         if: (github.event_name == 'create' && startsWith(github.ref, 'refs/heads/v')) || (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v'))
