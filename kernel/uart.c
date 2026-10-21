@@ -21,10 +21,81 @@ enum {
 
 static volatile uint32_t *g_uart = NULL;
 
+/*
+ * Translate an MMIO virtual address without dereferencing it. The AT
+ * instruction reports a translation/permission fault through PAR_ELx instead
+ * of raising a Data Abort, letting us fall back to the framebuffer console
+ * when firmware has not mapped the device into AstraOS's current address space.
+ */
+static bool uart_address_is_writable(uint64_t address) {
+#if defined(__aarch64__)
+    uint64_t current_el = 0u;
+    uint64_t control = 0u;
+    uint64_t par = 0u;
+
+    if (address == 0u || address > (uint64_t)UINTPTR_MAX) {
+        return false;
+    }
+
+    __asm__ volatile("mrs %0, CurrentEL" : "=r"(current_el));
+    if (current_el == UINT64_C(0x4)) {
+        __asm__ volatile("mrs %0, SCTLR_EL1" : "=r"(control));
+        if ((control & UINT64_C(1)) == 0u) {
+            return false;
+        }
+        __asm__ volatile(
+            "at s1e1w, %1\n\t"
+            "isb\n\t"
+            "mrs %0, PAR_EL1"
+            : "=r"(par)
+            : "r"(address)
+            : "memory"
+        );
+    } else if (current_el == UINT64_C(0x8)) {
+        __asm__ volatile("mrs %0, SCTLR_EL2" : "=r"(control));
+        if ((control & UINT64_C(1)) == 0u) {
+            return false;
+        }
+        __asm__ volatile(
+            "at s1e2w, %1\n\t"
+            "isb\n\t"
+            "mrs %0, PAR_EL2"
+            : "=r"(par)
+            : "r"(address)
+            : "memory"
+        );
+    } else {
+        return false;
+    }
+    return (par & UINT64_C(1)) == 0u;
+#else
+    (void)address;
+    return false;
+#endif
+}
+
+/* Check both ends so a register block crossing a page boundary is rejected
+ * unless both pages are writable in the current translation regime. */
+static bool uart_register_range_is_writable(uint64_t base) {
+    const uint64_t register_span =
+        ((uint64_t)UART_INTERRUPT_CLEAR + UINT64_C(1)) * sizeof(uint32_t);
+    uint64_t last_register = 0u;
+
+    if (base == 0u || base > UINT64_MAX - register_span) {
+        return false;
+    }
+    last_register = base + register_span - sizeof(uint32_t);
+    return uart_address_is_writable(base) &&
+        uart_address_is_writable(last_register);
+}
+
 /* FDT-described QEMU/board hardware uses the configured AstraOS console rate. */
 static bool uart_init_from_fdt(uint64_t uart_base) {
     volatile uint32_t *uart = (volatile uint32_t *)(uintptr_t)uart_base;
 
+    if (!uart_register_range_is_writable(uart_base)) {
+        return false;
+    }
     uart[UART_CONTROL] = 0u;
     uart[UART_INTERRUPT_MASK] = 0u;
     uart[UART_INTERRUPT_CLEAR] = 0x7ffu;
@@ -45,7 +116,8 @@ static bool uart_init_from_acpi(const AstraBootInfo *boot_info) {
     uint32_t fractional_baud = 0u;
     uint32_t line_control = 0u;
 
-    if (!astra_acpi_find_pl011_uart(boot_info, &spcr)) {
+    if (!astra_acpi_find_pl011_uart(boot_info, &spcr) ||
+        !uart_register_range_is_writable(spcr.base_address)) {
         return false;
     }
 
@@ -69,31 +141,11 @@ static bool uart_init_from_acpi(const AstraBootInfo *boot_info) {
     return true;
 }
 
-/*
- * Firmware-keyboard mode intentionally keeps UEFI Boot Services and their
- * existing address-space configuration alive. The kernel has not installed
- * its own translation tables, so a firmware-described PL011 is not guaranteed
- * to be mapped at its physical address in this mode. Do not probe/write UART
- * registers here: use UEFI input and the GOP framebuffer instead.
- */
-static bool uart_must_remain_unused(const AstraBootInfo *boot_info) {
-    const uint64_t required_flags =
-        ASTRA_BOOT_FLAG_BOOT_SERVICES_ACTIVE | ASTRA_BOOT_FLAG_UEFI_TEXT_INPUT;
-
-    return boot_info != NULL &&
-        boot_info->magic == ASTRA_BOOT_INFO_MAGIC &&
-        boot_info->version == ASTRA_BOOT_INFO_VERSION &&
-        (boot_info->flags & required_flags) == required_flags;
-}
-
 /* Failure leaves the framebuffer available and never probes an assumed address. */
 bool astra_uart_init(const AstraBootInfo *boot_info) {
     uint64_t uart_base = 0u;
 
     g_uart = NULL;
-    if (uart_must_remain_unused(boot_info)) {
-        return false;
-    }
     if (astra_platform_find_pl011_uart_from_fdt(boot_info, &uart_base)) {
         return uart_init_from_fdt(uart_base);
     }
