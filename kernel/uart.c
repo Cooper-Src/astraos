@@ -23,7 +23,7 @@ static volatile uint32_t *g_uart = NULL;
 
 /*
  * Translate an MMIO virtual address without dereferencing it. The AT
- * instruction reports a translation/permission fault through PAR_ELx instead
+ * instruction reports a translation/permission fault through PAR_EL1 instead
  * of raising a Data Abort, letting us fall back to the framebuffer console
  * when firmware has not mapped the device into AstraOS's current address space.
  */
@@ -56,10 +56,11 @@ static bool uart_address_is_writable(uint64_t address) {
         if ((control & UINT64_C(1)) == 0u) {
             return false;
         }
+        /* All address-translation instructions report via PAR_EL1. */
         __asm__ volatile(
             "at s1e2w, %1\n\t"
             "isb\n\t"
-            "mrs %0, PAR_EL2"
+            "mrs %0, PAR_EL1"
             : "=r"(par)
             : "r"(address)
             : "memory"
