@@ -28,41 +28,10 @@ _start:
 
 .Lset_vbar_el1:
     msr VBAR_EL1, x9
-    b .Ldisable_inherited_mmu_el1
+    b .Lvbar_ready
 
 .Lset_vbar_el2:
     msr VBAR_EL2, x9
-    b .Ldisable_inherited_mmu_el2
-
-/*
- * UEFI AArch64 enters OS loaders with the MMU enabled and only guarantees
- * identity mappings for RAM. Device/MMIO regions such as the GOP framebuffer
- * may therefore be unmapped after ExitBootServices(). AstraOS does not yet
- * install its own page tables, so retain the physical/virtual identity model
- * for the early kernel by disabling the inherited firmware MMU before calling
- * into C. This also makes the GOP framebuffer directly addressable.
- *
- * The current kernel is deliberately an early bring-up environment without
- * virtual memory. When real page tables are introduced, this block should be
- * replaced by the kernel's MMU initialization rather than left as a permanent
- * policy.
- */
-.Ldisable_inherited_mmu_el1:
-    dsb sy
-    mrs x11, SCTLR_EL1
-    bic x11, x11, #1          // SCTLR_EL1.M: disable stage-1 MMU
-    msr SCTLR_EL1, x11
-    isb
-    dsb sy
-    b .Lvbar_ready
-
-.Ldisable_inherited_mmu_el2:
-    dsb sy
-    mrs x11, SCTLR_EL2
-    bic x11, x11, #1          // SCTLR_EL2.M: disable stage-1 MMU
-    msr SCTLR_EL2, x11
-    isb
-    dsb sy
 
 .Lvbar_ready:
     isb
