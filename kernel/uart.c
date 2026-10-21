@@ -69,11 +69,31 @@ static bool uart_init_from_acpi(const AstraBootInfo *boot_info) {
     return true;
 }
 
+/*
+ * Firmware-keyboard mode intentionally keeps UEFI Boot Services and their
+ * existing address-space configuration alive. The kernel has not installed
+ * its own translation tables, so a firmware-described PL011 is not guaranteed
+ * to be mapped at its physical address in this mode. Do not probe/write UART
+ * registers here: use UEFI input and the GOP framebuffer instead.
+ */
+static bool uart_must_remain_unused(const AstraBootInfo *boot_info) {
+    const uint64_t required_flags =
+        ASTRA_BOOT_FLAG_BOOT_SERVICES_ACTIVE | ASTRA_BOOT_FLAG_UEFI_TEXT_INPUT;
+
+    return boot_info != NULL &&
+        boot_info->magic == ASTRA_BOOT_INFO_MAGIC &&
+        boot_info->version == ASTRA_BOOT_INFO_VERSION &&
+        (boot_info->flags & required_flags) == required_flags;
+}
+
 /* Failure leaves the framebuffer available and never probes an assumed address. */
 bool astra_uart_init(const AstraBootInfo *boot_info) {
     uint64_t uart_base = 0u;
 
     g_uart = NULL;
+    if (uart_must_remain_unused(boot_info)) {
+        return false;
+    }
     if (astra_platform_find_pl011_uart_from_fdt(boot_info, &uart_base)) {
         return uart_init_from_fdt(uart_base);
     }
