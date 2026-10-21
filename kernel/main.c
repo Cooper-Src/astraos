@@ -8,6 +8,7 @@
 #include "input.h"
 #include "uart.h"
 #include "vfs.h"
+#include "system.h"
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -18,6 +19,10 @@ enum { KERNEL_LINE_CAP = 256 };
 static AstraVfs g_vfs;
 static AstraMemory g_memory;
 static bool g_memory_ready = false;
+
+AstraVfs *astra_system_vfs(void) {
+    return &g_vfs;
+}
 
 static size_t text_length(const char *text) {
     size_t length = 0;
