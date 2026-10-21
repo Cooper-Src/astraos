@@ -219,8 +219,12 @@ static void focus_surface(AstraDisplaySurface *surface) {
         return;
     }
     if (g_next_z_order == UINT32_MAX) {
-        bool assigned[DISPLAY_SURFACE_CAP] = {false, false, false, false, false};
+        bool assigned[DISPLAY_SURFACE_CAP];
         uint32_t next_order = 1u;
+
+        for (size_t index = 0u; index < DISPLAY_SURFACE_CAP; index++) {
+            assigned[index] = false;
+        }
 
         for (size_t pass = 0u; pass < DISPLAY_SURFACE_CAP; pass++) {
             size_t selected = DISPLAY_SURFACE_CAP;
@@ -558,7 +562,7 @@ static void terminal_clear_history(void) {
 }
 
 static void terminal_report_vfs(AstraVfsResult result) {
-    char message[DISPLAY_TERMINAL_TEXT_CAP] = {0};
+    char message[DISPLAY_TERMINAL_TEXT_CAP];
 
     string_copy(message, sizeof message, "error: ");
     string_append(message, sizeof message, astra_vfs_result_name(result));
@@ -566,7 +570,7 @@ static void terminal_report_vfs(AstraVfsResult result) {
 }
 
 static void terminal_command_pwd(AstraVfs *fs) {
-    char path[ASTRA_VFS_PATH_CAP] = {0};
+    char path[ASTRA_VFS_PATH_CAP];
     size_t path_length = 0u;
     const AstraVfsResult result = astra_vfs_pwd(
         fs, path, sizeof path, &path_length
@@ -581,7 +585,7 @@ static void terminal_command_pwd(AstraVfs *fs) {
 }
 
 static void terminal_command_ls(AstraVfs *fs, const char *path, size_t path_length) {
-    AstraVfsEntry entries[ASTRA_VFS_MAX_NODES] = {0};
+    AstraVfsEntry entries[ASTRA_VFS_MAX_NODES];
     size_t count = 0u;
     const char *effective_path = path_length == 0u ? "." : path;
     const size_t effective_length = path_length == 0u ? 1u : path_length;
@@ -597,7 +601,7 @@ static void terminal_command_ls(AstraVfs *fs, const char *path, size_t path_leng
         terminal_history_push("(empty directory)");
     }
     for (size_t index = 0u; index < count && index < ASTRA_VFS_MAX_NODES; index++) {
-        char line[DISPLAY_TERMINAL_TEXT_CAP] = {0};
+        char line[DISPLAY_TERMINAL_TEXT_CAP];
         string_copy(line, sizeof line, entries[index].is_directory ? "[DIR] " : "      ");
         string_append(line, sizeof line, entries[index].name);
         if (entries[index].is_directory) {
@@ -608,14 +612,15 @@ static void terminal_command_ls(AstraVfs *fs, const char *path, size_t path_leng
 }
 
 static void terminal_command_cat(AstraVfs *fs, const char *path, size_t path_length) {
-    char content[ASTRA_VFS_CONTENT_CAP] = {0};
-    char line[DISPLAY_TERMINAL_TEXT_CAP] = {0};
+    char content[ASTRA_VFS_CONTENT_CAP];
+    char line[DISPLAY_TERMINAL_TEXT_CAP];
     size_t content_length = 0u;
     size_t line_length = 0u;
     const AstraVfsResult result = astra_vfs_read(
         fs, path, path_length, content, sizeof content, &content_length
     );
 
+    line[0] = '\0';
     if (result != ASTRA_VFS_OK) {
         terminal_report_vfs(result);
         return;
@@ -668,8 +673,8 @@ static void terminal_command_create(
 }
 
 static void terminal_execute(void) {
-    char command[16] = {0};
-    char echo[DISPLAY_TERMINAL_TEXT_CAP] = {0};
+    char command[16];
+    char echo[DISPLAY_TERMINAL_TEXT_CAP];
     const size_t line_length = string_length(g_terminal_line);
     const size_t command_end = skip_spaces(g_terminal_line, line_length, 0u);
     size_t command_length = command_end;
@@ -678,6 +683,7 @@ static void terminal_execute(void) {
     const char *args = NULL;
     AstraVfs *fs = astra_system_vfs();
 
+    command[0] = '\0';
     while (command_length < line_length &&
         g_terminal_line[command_length] != ' ' &&
         g_terminal_line[command_length] != '\t') {
@@ -796,7 +802,7 @@ static void terminal_execute(void) {
         close_surface(find_surface(DISPLAY_APP_TERMINAL));
         astra_uart_puts("desktop: terminal window closed\n");
     } else if (g_terminal_line[0] != '\0') {
-        char message[DISPLAY_TERMINAL_TEXT_CAP] = {0};
+        char message[DISPLAY_TERMINAL_TEXT_CAP];
         string_copy(message, sizeof message, "command not found: ");
         string_append(message, sizeof message, command);
         terminal_history_push(message);
@@ -833,7 +839,7 @@ static bool files_list(AstraVfsEntry *entries, size_t *count_out) {
     );
 
     if (result != ASTRA_VFS_OK) {
-        char message[DISPLAY_TERMINAL_TEXT_CAP] = {0};
+        char message[DISPLAY_TERMINAL_TEXT_CAP];
         string_copy(message, sizeof message, "File list error: ");
         string_append(message, sizeof message, astra_vfs_result_name(result));
         astra_uart_puts(message);
@@ -875,9 +881,9 @@ static bool build_child_path(
 }
 
 static void files_open_selected(void) {
-    AstraVfsEntry entries[ASTRA_VFS_MAX_NODES] = {0};
+    AstraVfsEntry entries[ASTRA_VFS_MAX_NODES];
     size_t count = 0u;
-    char target[ASTRA_VFS_PATH_CAP] = {0};
+    char target[ASTRA_VFS_PATH_CAP];
     AstraVfs *fs = astra_system_vfs();
 
     if (fs == NULL || !files_list(entries, &count) || g_files_selection >= count) {
@@ -933,7 +939,7 @@ static void files_parent_directory(void) {
 }
 
 static bool handle_files_key(uint8_t key) {
-    AstraVfsEntry entries[ASTRA_VFS_MAX_NODES] = {0};
+    AstraVfsEntry entries[ASTRA_VFS_MAX_NODES];
     size_t count = 0u;
 
     if (key == (uint8_t)'j' || key == (uint8_t)'J') {
@@ -1065,12 +1071,12 @@ static void render_terminal(const AstraDisplaySurface *surface) {
 }
 
 static void render_files(const AstraDisplaySurface *surface) {
-    AstraVfsEntry entries[ASTRA_VFS_MAX_NODES] = {0};
+    AstraVfsEntry entries[ASTRA_VFS_MAX_NODES];
     size_t count = 0u;
     uint32_t row_y = surface->y + DISPLAY_TITLEBAR_HEIGHT + 18u;
     uint32_t rows_available = surface->height > 116u ?
         (surface->height - 116u) / 18u : 1u;
-    char path_label[DISPLAY_TERMINAL_TEXT_CAP] = {0};
+    char path_label[DISPLAY_TERMINAL_TEXT_CAP];
 
     astra_framebuffer_fill_rect(
         surface->x + 10u, surface->y + DISPLAY_TITLEBAR_HEIGHT + 8u,
@@ -1099,7 +1105,7 @@ static void render_files(const AstraDisplaySurface *surface) {
     }
     for (uint32_t row = 0u; row < rows_available; row++) {
         const size_t entry_index = g_files_scroll + (size_t)row;
-        char line[DISPLAY_TERMINAL_TEXT_CAP] = {0};
+        char line[DISPLAY_TERMINAL_TEXT_CAP];
 
         if (entry_index >= count) {
             break;
@@ -1155,7 +1161,7 @@ static void render_viewer(const AstraDisplaySurface *surface) {
         draw_text(surface->x + 18u, row_y, "(empty file)", COLOR_MUTED);
     }
     for (uint32_t row = 0u; row < rows_available && position < g_viewer_content_length; row++) {
-        char line[DISPLAY_TERMINAL_TEXT_CAP] = {0};
+        char line[DISPLAY_TERMINAL_TEXT_CAP];
         size_t used = 0u;
 
         while (position < g_viewer_content_length &&
@@ -1282,8 +1288,11 @@ static void render_applications_menu(void) {
 }
 
 static void render_desktop(void) {
-    bool rendered[DISPLAY_SURFACE_CAP] = {false, false, false, false, false};
+    bool rendered[DISPLAY_SURFACE_CAP];
 
+    for (size_t index = 0u; index < DISPLAY_SURFACE_CAP; index++) {
+        rendered[index] = false;
+    }
     render_desktop_background();
     for (size_t pass = 0u; pass < DISPLAY_SURFACE_CAP; pass++) {
         size_t selected = DISPLAY_SURFACE_CAP;
