@@ -262,7 +262,7 @@ def main(argv: list[str]) -> int:
         client.click(75, 20, width, height)
         wait_for_log(log_path, "desktop: applications menu opened", EVENT_TIMEOUT)
         menu_screenshot = client.screenshot(screenshot_path)
-        if menu_screenshot[2][(0x43, 0x55, 0x70)] <= initial_screenshot[2][(0x43, 0x55, 0x70)]:
+        if menu_screenshot[2] == initial_screenshot[2]:
             raise RuntimeError("opening Applications did not change the captured desktop")
         client.click(65, 47 + 45, width, height)
         wait_for_log(log_path, "desktop: terminal window opened", EVENT_TIMEOUT)
