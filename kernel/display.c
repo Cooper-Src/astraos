@@ -100,6 +100,7 @@ static size_t g_viewer_content_length;
 static size_t g_viewer_scroll;
 static bool g_menu_open;
 static bool g_pointer_enabled;
+static bool g_pointer_event_logged;
 static uint32_t g_pointer_x;
 static uint32_t g_pointer_y;
 static int32_t g_pointer_motion_x;
@@ -1768,6 +1769,10 @@ static void handle_pointer_event(const AstraInputEvent *event) {
     if (event == NULL || !g_pointer_enabled) {
         return;
     }
+    if (!g_pointer_event_logged) {
+        g_pointer_event_logged = true;
+        astra_uart_puts("desktop: pointer event received\\n");
+    }
     update_pointer_position(event);
     if (event->pointer_dz != 0) {
         AstraDisplaySurface *surface = focused_surface();
@@ -1891,6 +1896,7 @@ bool astra_display_server_run(void) {
     g_viewer_scroll = 0u;
     g_menu_open = false;
     g_pointer_enabled = astra_input_pointer_available();
+    g_pointer_event_logged = false;
     g_pointer_x = 28u;
     g_pointer_y = 20u;
     g_pointer_motion_x = 0;
