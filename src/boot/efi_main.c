@@ -32,8 +32,13 @@ enum {
     EFI_ALLOCATE_ANY_PAGES = 0,
     EFI_LOADER_CODE = 1,
     EFI_LOADER_DATA = 2,
-    EFI_FILE_MODE_READ = 1
+    EFI_FILE_MODE_READ = 1,
+    EFI_TPL_CALLBACK = 8u,
+    EFI_TIMER_PERIODIC = 1u,
+    EFI_POINTER_POLL_INTERVAL_100NS = 100000u
 };
+
+#define EFI_EVT_TIMER UINT32_C(0x80000000)
 
 enum {
     KERNEL_STAGING_CAP = 1024u * 1024u,
@@ -96,6 +101,14 @@ typedef EFI_STATUS (EFIAPI *EFI_GET_MEMORY_MAP)(
 );
 typedef EFI_STATUS (EFIAPI *EFI_EXIT_BOOT_SERVICES)(EFI_HANDLE, EFI_UINTN);
 typedef EFI_STATUS (EFIAPI *EFI_LOCATE_PROTOCOL)(EFI_GUID *, void *, void **);
+typedef EFI_STATUS (EFIAPI *EFI_CREATE_EVENT)(
+    EFI_UINT32 type, EFI_UINTN notify_tpl,
+    void *notify_function, void *notify_context, void **event_out
+);
+typedef EFI_STATUS (EFIAPI *EFI_SET_TIMER)(
+    void *event, EFI_UINT32 type, EFI_UINT64 trigger_time
+);
+typedef EFI_STATUS (EFIAPI *EFI_CLOSE_EVENT)(void *event);
 
 struct EFI_BOOT_SERVICES {
     EFI_TABLE_HEADER Hdr;
@@ -106,11 +119,11 @@ struct EFI_BOOT_SERVICES {
     EFI_GET_MEMORY_MAP GetMemoryMap;
     void *AllocatePool;
     void *FreePool;
-    void *CreateEvent;
-    void *SetTimer;
+    EFI_CREATE_EVENT CreateEvent;
+    EFI_SET_TIMER SetTimer;
     AstraFirmwareWaitForEvent WaitForEvent;
     void *SignalEvent;
-    void *CloseEvent;
+    EFI_CLOSE_EVENT CloseEvent;
     void *CheckEvent;
     void *InstallProtocolInterface;
     void *ReinstallProtocolInterface;
@@ -1034,6 +1047,7 @@ static void capture_firmware_pointer(
         return;
     }
     boot_info->firmware_pointer_protocol = NULL;
+    boot_info->firmware_pointer_poll_event = NULL;
     if (boot_services == NULL || boot_services->LocateProtocol == NULL) {
         return;
     }
@@ -1052,6 +1066,42 @@ static void capture_firmware_pointer(
 
     boot_info->firmware_pointer_protocol = pointer;
     loader_out(L"UEFI relative mouse detected.\\r\\n");
+
+    /*
+     * Some UEFI builds do not signal Simple Pointer.WaitForInput reliably.
+     * A 10 ms timer wakes the event loop so GetState can be polled without
+     * spinning continuously.
+     */
+    if (boot_services->CreateEvent != NULL &&
+        boot_services->SetTimer != NULL &&
+        boot_services->CloseEvent != NULL) {
+        EFI_STATUS timer_status = EFI_UNSUPPORTED;
+        void *poll_event = NULL;
+
+        timer_status = boot_services->CreateEvent(
+            EFI_EVT_TIMER, EFI_TPL_CALLBACK, NULL, NULL, &poll_event
+        );
+        if (timer_status == EFI_SUCCESS && poll_event != NULL) {
+            timer_status = boot_services->SetTimer(
+                poll_event, EFI_TIMER_PERIODIC,
+                (EFI_UINT64)EFI_POINTER_POLL_INTERVAL_100NS
+            );
+            if (timer_status == EFI_SUCCESS) {
+                boot_info->firmware_pointer_poll_event = poll_event;
+                loader_out(L"UEFI mouse polling timer enabled.\\r\\n");
+            } else {
+                (void)boot_services->CloseEvent(poll_event);
+                loader_out(L"Warning: UEFI mouse polling timer could not start.\\r\\n");
+            }
+        } else {
+            if (poll_event != NULL) {
+                (void)boot_services->CloseEvent(poll_event);
+            }
+            loader_out(L"Warning: UEFI mouse polling timer could not be created.\\r\\n");
+        }
+    } else {
+        loader_out(L"Warning: UEFI mouse polling timer services are unavailable.\\r\\n");
+    }
 }
 
 static void stop_forever(void) {
