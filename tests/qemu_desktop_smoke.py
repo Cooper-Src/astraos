@@ -90,23 +90,37 @@ class QMPClient:
         self.execute("human-monitor-command", {"command-line": f"sendkey {key}"})
 
     def move_pointer_to(self, x: int, y: int, width: int, height: int) -> None:
-        """Send absolute pointer coordinates to the explicitly selected QEMU display."""
+        """Move the relative USB mouse with bounded, display-routed QMP events."""
         if width < 2 or height < 2:
             raise ValueError("framebuffer dimensions are too small for pointer input")
         x = max(0, min(x, width - 1))
         y = max(0, min(y, height - 1))
-        absolute_x = x * 0x7FFF // (width - 1)
-        absolute_y = y * 0x7FFF // (height - 1)
-        self.execute(
-            "input-send-event",
-            {
-                "device": "video0",
-                "events": [
-                    {"type": "abs", "data": {"axis": "x", "value": absolute_x}},
-                    {"type": "abs", "data": {"axis": "y", "value": absolute_y}},
-                ],
-            },
-        )
+        if self._pointer_x is None or self._pointer_y is None:
+            self._pointer_x = width // 2
+            self._pointer_y = height // 2
+        delta_x = int((x - self._pointer_x) / 2)
+        delta_y = int((y - self._pointer_y) / 2)
+        steps = max(1, (max(abs(delta_x), abs(delta_y)) + 39) // 40)
+        for step in range(steps):
+            next_x = int(delta_x * (step + 1) / steps)
+            prev_x = int(delta_x * step / steps)
+            next_y = int(delta_y * (step + 1) / steps)
+            prev_y = int(delta_y * step / steps)
+            relative_x = next_x - prev_x
+            relative_y = next_y - prev_y
+            if relative_x == 0 and relative_y == 0:
+                continue
+            self.execute(
+                "input-send-event",
+                {
+                    "device": "video0",
+                    "events": [
+                        {"type": "rel", "data": {"axis": "x", "value": relative_x}},
+                        {"type": "rel", "data": {"axis": "y", "value": relative_y}},
+                    ],
+                },
+            )
+            time.sleep(0.02)
         self._pointer_x = x
         self._pointer_y = y
         time.sleep(0.2)
