@@ -102,6 +102,8 @@ static bool g_menu_open;
 static bool g_pointer_enabled;
 static uint32_t g_pointer_x;
 static uint32_t g_pointer_y;
+static int32_t g_pointer_motion_x;
+static int32_t g_pointer_motion_y;
 static bool g_pointer_left_down;
 static bool g_pointer_right_down;
 static int g_drag_surface;
@@ -1414,12 +1416,57 @@ static uint32_t clamp_cursor_axis(uint32_t position, int32_t delta, uint32_t lim
     return (uint32_t)next;
 }
 
+static uint32_t map_absolute_axis(
+    uint64_t value,
+    uint64_t minimum,
+    uint64_t maximum,
+    uint32_t screen_limit
+) {
+    uint64_t offset = 0u;
+    uint64_t range = 0u;
+    uint64_t scaled = 0u;
+
+    if (screen_limit == 0u || maximum <= minimum || value <= minimum) {
+        return 0u;
+    }
+    if (value >= maximum) {
+        return screen_limit - 1u;
+    }
+
+    offset = value - minimum;
+    range = maximum - minimum;
+    /* UEFI mode ranges are validated to fit uint32_t before this multiplication. */
+    scaled = offset * (uint64_t)(screen_limit - 1u);
+    return (uint32_t)(scaled / range);
+}
+
 static void update_pointer_position(const AstraInputEvent *event) {
+    uint32_t previous_x = 0u;
+    uint32_t previous_y = 0u;
+
+    g_pointer_motion_x = 0;
+    g_pointer_motion_y = 0;
     if (event == NULL || !g_pointer_enabled) {
         return;
     }
-    g_pointer_x = clamp_cursor_axis(g_pointer_x, event->pointer_dx, g_screen_width);
-    g_pointer_y = clamp_cursor_axis(g_pointer_y, event->pointer_dy, g_screen_height);
+
+    previous_x = g_pointer_x;
+    previous_y = g_pointer_y;
+    if (event->absolute) {
+        g_pointer_x = map_absolute_axis(
+            event->absolute_x, event->absolute_min_x, event->absolute_max_x,
+            g_screen_width
+        );
+        g_pointer_y = map_absolute_axis(
+            event->absolute_y, event->absolute_min_y, event->absolute_max_y,
+            g_screen_height
+        );
+    } else {
+        g_pointer_x = clamp_cursor_axis(g_pointer_x, event->pointer_dx, g_screen_width);
+        g_pointer_y = clamp_cursor_axis(g_pointer_y, event->pointer_dy, g_screen_height);
+    }
+    g_pointer_motion_x = (int32_t)g_pointer_x - (int32_t)previous_x;
+    g_pointer_motion_y = (int32_t)g_pointer_y - (int32_t)previous_y;
 }
 
 static void move_dragged_surface(const AstraInputEvent *event) {
@@ -1440,8 +1487,8 @@ static void move_dragged_surface(const AstraInputEvent *event) {
         g_drag_surface = -1;
         return;
     }
-    delta_x = (int64_t)event->pointer_dx * (int64_t)DISPLAY_POINTER_SCALE;
-    delta_y = (int64_t)event->pointer_dy * (int64_t)DISPLAY_POINTER_SCALE;
+    delta_x = (int64_t)g_pointer_motion_x;
+    delta_y = (int64_t)g_pointer_motion_y;
 
     if (g_drag_resize) {
         maximum_width = g_screen_width > surface->x + 4u ?
@@ -1846,6 +1893,8 @@ bool astra_display_server_run(void) {
     g_pointer_enabled = astra_input_pointer_available();
     g_pointer_x = 28u;
     g_pointer_y = 20u;
+    g_pointer_motion_x = 0;
+    g_pointer_motion_y = 0;
     g_pointer_left_down = false;
     g_pointer_right_down = false;
     g_drag_surface = -1;
