@@ -14,7 +14,8 @@
 enum {
     ASTRA_INPUT_ASCII_MAX = 0x7f,
     ASTRA_INPUT_DAIF_IRQ_MASK_BIT = 7u,
-    ASTRA_INPUT_VBAR_ALIGNMENT_MASK = 0x7ffu
+    ASTRA_INPUT_VBAR_ALIGNMENT_MASK = 0x7ffu,
+    ASTRA_INPUT_EVENT_CAP = 2u
 };
 
 typedef struct AstraFirmwareCallState {
@@ -24,16 +25,18 @@ typedef struct AstraFirmwareCallState {
 
 static bool g_use_serial_input = false;
 static AstraFirmwareTextInputProtocol *g_firmware_input = NULL;
+static AstraFirmwareSimplePointerProtocol *g_firmware_pointer = NULL;
 static AstraFirmwareWaitForEvent g_wait_for_event = NULL;
 static uint64_t g_firmware_exception_level = 0u;
 static uint64_t g_firmware_exception_vector = 0u;
 static uint64_t g_firmware_daif = 0u;
+static bool g_last_pointer_left = false;
+static bool g_last_pointer_right = false;
 
 #if defined(__aarch64__)
 /*
- * Temporarily restores firmware exception handling while calling UEFI input
- * services. The kernel masks interrupts and installs its own vectors at entry;
- * firmware USB/input event handlers need their original vector table.
+ * Firmware USB drivers depend on the firmware's exception vectors and IRQ
+ * state. Borrow them only for a UEFI call, then restore the kernel state.
  */
 static bool firmware_context_enter(AstraFirmwareCallState *state) {
     uint64_t kernel_vector = 0u;
@@ -43,7 +46,6 @@ static bool firmware_context_enter(AstraFirmwareCallState *state) {
         return false;
     }
 
-#if defined(__aarch64__)
     if (g_firmware_exception_level == UINT64_C(1)) {
         __asm__ volatile(
             "mrs %0, VBAR_EL1\n\t"
@@ -82,11 +84,6 @@ static bool firmware_context_enter(AstraFirmwareCallState *state) {
         );
         return true;
     }
-#else
-    (void)kernel_vector;
-    (void)kernel_daif;
-#endif
-
     return false;
 }
 
@@ -96,7 +93,6 @@ static void firmware_context_leave(const AstraFirmwareCallState *state) {
         return;
     }
 
-#if defined(__aarch64__)
     if (g_firmware_exception_level == UINT64_C(1)) {
         __asm__ volatile(
             "msr DAIFSet, #0xf\n\t"
@@ -122,11 +118,7 @@ static void firmware_context_leave(const AstraFirmwareCallState *state) {
             : "memory"
         );
     }
-#else
-    (void)state;
-#endif
 }
-
 #endif
 
 static uint64_t firmware_read_key(AstraFirmwareInputKey *key_out) {
@@ -152,23 +144,89 @@ static uint64_t firmware_read_key(AstraFirmwareInputKey *key_out) {
     return status;
 }
 
-static uint64_t firmware_wait_for_key(void) {
+static bool firmware_poll_pointer(AstraInputEvent *event_out, bool *ready_out) {
     AstraFirmwareCallState state = {0};
-    void *events[1] = {NULL};
+    AstraFirmwareSimplePointerState pointer_state = {0};
+    AstraFirmwareSimplePointerProtocol *pointer = g_firmware_pointer;
+    uint64_t status = ASTRA_INPUT_EFI_UNSUPPORTED;
+    bool left = false;
+    bool right = false;
+    bool changed = false;
+
+    if (event_out == NULL || ready_out == NULL) {
+        return false;
+    }
+    *ready_out = false;
+    if (pointer == NULL) {
+        return true;
+    }
+
+#if defined(__aarch64__)
+    if (!firmware_context_enter(&state)) {
+        g_firmware_pointer = NULL;
+        return true;
+    }
+    status = pointer->get_state(pointer, &pointer_state);
+    firmware_context_leave(&state);
+#else
+    (void)state;
+    (void)pointer_state;
+#endif
+
+    if (status == ASTRA_INPUT_EFI_NOT_READY) {
+        return true;
+    }
+    if (status != ASTRA_INPUT_EFI_SUCCESS) {
+        g_firmware_pointer = NULL;
+        astra_uart_puts("UEFI pointer polling failed; mouse input disabled.\n");
+        return true;
+    }
+
+    left = pointer_state.left_button != 0u;
+    right = pointer_state.right_button != 0u;
+    changed = pointer_state.relative_movement_x != 0 ||
+        pointer_state.relative_movement_y != 0 ||
+        left != g_last_pointer_left || right != g_last_pointer_right;
+    g_last_pointer_left = left;
+    g_last_pointer_right = right;
+
+    if (changed) {
+        event_out->type = ASTRA_INPUT_EVENT_POINTER;
+        event_out->key = 0u;
+        event_out->pointer_dx = pointer_state.relative_movement_x;
+        event_out->pointer_dy = pointer_state.relative_movement_y;
+        event_out->left_button_down = left;
+        event_out->right_button_down = right;
+        *ready_out = true;
+    }
+    return true;
+}
+
+/* Sleep on a firmware input event instead of spinning when the desktop is idle. */
+static uint64_t firmware_wait_for_input(uint64_t *event_index_out) {
+    AstraFirmwareCallState state = {0};
+    void *events[ASTRA_INPUT_EVENT_CAP] = {NULL, NULL};
+    uint64_t event_count = 0u;
     uint64_t event_index = UINT64_MAX;
     uint64_t status = ASTRA_INPUT_EFI_UNSUPPORTED;
 
     if (g_firmware_input == NULL || g_firmware_input->wait_for_key == NULL ||
-        g_wait_for_event == NULL) {
+        g_wait_for_event == NULL || event_index_out == NULL) {
         return ASTRA_INPUT_EFI_UNSUPPORTED;
     }
-    events[0] = g_firmware_input->wait_for_key;
+
+    events[event_count] = g_firmware_input->wait_for_key;
+    event_count++;
+    if (g_firmware_pointer != NULL && g_firmware_pointer->wait_for_input != NULL) {
+        events[event_count] = g_firmware_pointer->wait_for_input;
+        event_count++;
+    }
 
 #if defined(__aarch64__)
     if (!firmware_context_enter(&state)) {
         return ASTRA_INPUT_EFI_UNSUPPORTED;
     }
-    status = g_wait_for_event(UINT64_C(1), events, &event_index);
+    status = g_wait_for_event(event_count, events, &event_index);
     firmware_context_leave(&state);
 #else
     (void)state;
@@ -176,9 +234,11 @@ static uint64_t firmware_wait_for_key(void) {
     (void)event_index;
 #endif
 
-    if (status == ASTRA_INPUT_EFI_SUCCESS && event_index != UINT64_C(0)) {
-        return ASTRA_INPUT_EFI_UNSUPPORTED;
+    if (status != ASTRA_INPUT_EFI_SUCCESS || event_index >= event_count) {
+        return status == ASTRA_INPUT_EFI_SUCCESS ?
+            ASTRA_INPUT_EFI_UNSUPPORTED : status;
     }
+    *event_index_out = event_index;
     return status;
 }
 
@@ -195,10 +255,13 @@ bool astra_input_translate_key(uint16_t unicode_char, uint8_t *byte_out) {
 bool astra_input_initialize(const AstraBootInfo *boot_info, bool serial_ready) {
     g_use_serial_input = false;
     g_firmware_input = NULL;
+    g_firmware_pointer = NULL;
     g_wait_for_event = NULL;
     g_firmware_exception_level = 0u;
     g_firmware_exception_vector = 0u;
     g_firmware_daif = 0u;
+    g_last_pointer_left = false;
+    g_last_pointer_right = false;
 
     if (boot_info != NULL &&
         boot_info->magic == ASTRA_BOOT_INFO_MAGIC &&
@@ -215,6 +278,12 @@ bool astra_input_initialize(const AstraBootInfo *boot_info, bool serial_ready) {
         (boot_info->firmware_exception_vector &
             (uint64_t)ASTRA_INPUT_VBAR_ALIGNMENT_MASK) == 0u) {
         g_firmware_input = boot_info->firmware_input_protocol;
+        g_firmware_pointer = boot_info->firmware_pointer_protocol;
+        if (g_firmware_pointer != NULL &&
+            (g_firmware_pointer->get_state == NULL ||
+                g_firmware_pointer->wait_for_input == NULL)) {
+            g_firmware_pointer = NULL;
+        }
         g_wait_for_event = boot_info->firmware_wait_for_event;
         g_firmware_exception_level = boot_info->firmware_exception_level;
         g_firmware_exception_vector = boot_info->firmware_exception_vector;
@@ -224,6 +293,7 @@ bool astra_input_initialize(const AstraBootInfo *boot_info, bool serial_ready) {
         return true;
 #else
         g_firmware_input = NULL;
+        g_firmware_pointer = NULL;
         g_wait_for_event = NULL;
         g_firmware_exception_level = 0u;
         g_firmware_exception_vector = 0u;
@@ -238,13 +308,22 @@ bool astra_input_initialize(const AstraBootInfo *boot_info, bool serial_ready) {
     return false;
 }
 
-bool astra_input_read_byte(uint8_t *byte_out) {
-    if (byte_out == NULL) {
+bool astra_input_pointer_available(void) {
+    return !g_use_serial_input && g_firmware_pointer != NULL;
+}
+
+bool astra_input_read_event(AstraInputEvent *event_out) {
+    if (event_out == NULL) {
         return false;
     }
 
     if (g_use_serial_input) {
-        *byte_out = astra_uart_get_byte();
+        event_out->type = ASTRA_INPUT_EVENT_KEY;
+        event_out->key = astra_uart_get_byte();
+        event_out->pointer_dx = 0;
+        event_out->pointer_dy = 0;
+        event_out->left_button_down = false;
+        event_out->right_button_down = false;
         return true;
     }
 
@@ -254,21 +333,55 @@ bool astra_input_read_byte(uint8_t *byte_out) {
 
     for (;;) {
         AstraFirmwareInputKey key = {0};
+        uint8_t translated = 0u;
         uint64_t status = firmware_read_key(&key);
+        bool pointer_ready = false;
 
-        if (status == ASTRA_INPUT_EFI_SUCCESS) {
-            if (astra_input_translate_key(key.unicode_char, byte_out)) {
-                return true;
+        if (status == ASTRA_INPUT_EFI_SUCCESS &&
+            astra_input_translate_key(key.unicode_char, &translated)) {
+            event_out->type = ASTRA_INPUT_EVENT_KEY;
+            event_out->key = translated;
+            event_out->pointer_dx = 0;
+            event_out->pointer_dy = 0;
+            event_out->left_button_down = g_last_pointer_left;
+            event_out->right_button_down = g_last_pointer_right;
+            return true;
+        }
+        if (status != ASTRA_INPUT_EFI_SUCCESS &&
+            status != ASTRA_INPUT_EFI_NOT_READY) {
+            return false;
+        }
+
+        if (!firmware_poll_pointer(event_out, &pointer_ready)) {
+            return false;
+        }
+        if (pointer_ready) {
+            return true;
+        }
+
+        {
+            uint64_t event_index = UINT64_MAX;
+            status = firmware_wait_for_input(&event_index);
+            if (status != ASTRA_INPUT_EFI_SUCCESS) {
+                return false;
             }
-            continue;
         }
-        if (status != ASTRA_INPUT_EFI_NOT_READY) {
-            return false;
-        }
+    }
+}
 
-        status = firmware_wait_for_key();
-        if (status != ASTRA_INPUT_EFI_SUCCESS) {
+bool astra_input_read_byte(uint8_t *byte_out) {
+    if (byte_out == NULL) {
+        return false;
+    }
+
+    for (;;) {
+        AstraInputEvent event = {0};
+        if (!astra_input_read_event(&event)) {
             return false;
+        }
+        if (event.type == ASTRA_INPUT_EVENT_KEY) {
+            *byte_out = event.key;
+            return true;
         }
     }
 }
