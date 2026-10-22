@@ -85,30 +85,36 @@ class QMPClient:
         self.execute("human-monitor-command", {"command-line": f"sendkey {key}"})
 
     def pointer_position(self, x: int, y: int, width: int, height: int) -> None:
-        """Move the emulated relative USB mouse by injecting QMP motion events."""
+        """Move an emulated relative USB mouse through bounded HID-sized motion steps."""
         if width < 2 or height < 2:
             raise ValueError("framebuffer dimensions are too small for pointer injection")
-        x = max(0, min(x, width - 1))
-        y = max(0, min(y, height - 1))
+        target_x = max(0, min(x, width - 1))
+        target_y = max(0, min(y, height - 1))
         if self._pointer_x is None or self._pointer_y is None:
-            # AstraOS starts its cursor at the screen centre.
+            # AstraOS starts its software cursor at the screen centre.
             self._pointer_x = width // 2
             self._pointer_y = height // 2
 
-        # AstraOS applies a two-pixel scale factor to relative pointer deltas.
-        delta_x = (x - self._pointer_x) // 2
-        delta_y = (y - self._pointer_y) // 2
-        self.execute(
-            "input-send-event",
-            {
-                "events": [
-                    {"type": "rel", "data": {"axis": "x", "value": delta_x}},
-                    {"type": "rel", "data": {"axis": "y", "value": delta_y}},
-                ]
-            },
-        )
-        self._pointer_x = max(0, min(self._pointer_x + delta_x * 2, width - 1))
-        self._pointer_y = max(0, min(self._pointer_y + delta_y * 2, height - 1))
+        # The compositor doubles relative deltas, so convert screen pixels to device units.
+        remaining_x = (target_x - self._pointer_x) // 2
+        remaining_y = (target_y - self._pointer_y) // 2
+        step_limit = 48
+        while remaining_x != 0 or remaining_y != 0:
+            step_x = max(-step_limit, min(step_limit, remaining_x))
+            step_y = max(-step_limit, min(step_limit, remaining_y))
+            events: list[dict[str, Any]] = []
+            if step_x != 0:
+                events.append({"type": "rel", "data": {"axis": "x", "value": step_x}})
+            if step_y != 0:
+                events.append({"type": "rel", "data": {"axis": "y", "value": step_y}})
+            self.execute("input-send-event", {"events": events})
+            remaining_x -= step_x
+            remaining_y -= step_y
+            # Let the virtual HID report and UEFI's polling event run between packets.
+            time.sleep(0.03)
+
+        self._pointer_x = max(0, min(self._pointer_x + ((target_x - self._pointer_x) // 2) * 2, width - 1))
+        self._pointer_y = max(0, min(self._pointer_y + ((target_y - self._pointer_y) // 2) * 2, height - 1))
 
     def mouse_button(self, down: bool) -> None:
         self.execute(
