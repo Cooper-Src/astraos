@@ -14,6 +14,7 @@ CONNECT_TIMEOUT = 12.0
 COMMAND_TIMEOUT = 4.0
 BOOT_TIMEOUT = 22.0
 EVENT_TIMEOUT = 5.0
+POINTER_SCALE = 3
 
 
 class QMPClient:
@@ -118,13 +119,139 @@ def type_command(client: QMPClient, command: str) -> None:
     client.send_key("ret")
 
 
+
+def send_mouse_move(client: QMPClient, dx: int, dy: int) -> None:
+    events: list[dict[str, Any]] = []
+    if dx != 0:
+        events.append({"type": "rel", "data": {"axis": "x", "value": dx}})
+    if dy != 0:
+        events.append({"type": "rel", "data": {"axis": "y", "value": dy}})
+    if events:
+        client.execute("input-send-event", {"events": events})
+        time.sleep(0.2)
+
+
+def click_mouse(client: QMPClient) -> None:
+    client.execute(
+        "input-send-event",
+        {"events": [{"type": "btn", "data": {"down": True, "button": "left"}}]},
+    )
+    time.sleep(0.18)
+    client.execute(
+        "input-send-event",
+        {"events": [{"type": "btn", "data": {"down": False, "button": "left"}}]},
+    )
+    time.sleep(0.18)
+
+
+def move_mouse_to(
+    client: QMPClient,
+    current_x: int,
+    current_y: int,
+    target_x: int,
+    target_y: int,
+    screen_width: int,
+    screen_height: int,
+) -> tuple[int, int]:
+    dx = int(round((target_x - current_x) / POINTER_SCALE))
+    dy = int(round((target_y - current_y) / POINTER_SCALE))
+    send_mouse_move(client, dx, dy)
+    current_x = max(0, min(screen_width - 1, current_x + dx * POINTER_SCALE))
+    current_y = max(0, min(screen_height - 1, current_y + dy * POINTER_SCALE))
+    return current_x, current_y
+
+
+def capture_and_verify_desktop(client: QMPClient, screenshot_path: Path) -> tuple[int, int]:
+    response = client.execute(
+        "human-monitor-command",
+        {"command-line": f"screendump {screenshot_path}"},
+    )
+    if isinstance(response, str) and "error" in response.lower():
+        raise RuntimeError(f"QEMU screendump failed: {response}")
+    try:
+        raw = screenshot_path.read_bytes()
+    except OSError as error:
+        raise RuntimeError(f"desktop screenshot was not written: {error}") from error
+
+    position = 0
+
+    def next_token() -> str:
+        nonlocal position
+        while position < len(raw):
+            if raw[position] in b" \t\r\n":
+                position += 1
+                continue
+            if raw[position] == ord("#"):
+                while position < len(raw) and raw[position] not in b"\r\n":
+                    position += 1
+                continue
+            break
+        start = position
+        while position < len(raw) and raw[position] not in b" \t\r\n#":
+            position += 1
+        if start == position:
+            raise RuntimeError("invalid PPM screenshot header")
+        token = raw[start:position].decode("ascii")
+        if position < len(raw) and raw[position] in b" \t\r\n":
+            if raw[position:position + 2] == b"\r\n":
+                position += 2
+            else:
+                position += 1
+        return token
+
+    try:
+        magic = next_token()
+        width = int(next_token())
+        height = int(next_token())
+        maximum = int(next_token())
+    except (ValueError, UnicodeDecodeError) as error:
+        raise RuntimeError("could not parse QEMU screenshot header") from error
+    if magic != "P6" or width < 480 or height < 360 or maximum != 255:
+        raise RuntimeError(
+            f"unexpected desktop screenshot format: {magic} {width}x{height} max={maximum}"
+        )
+
+    pixels = raw[position:]
+    expected_bytes = width * height * 3
+    if len(pixels) < expected_bytes:
+        raise RuntimeError(
+            f"desktop screenshot is truncated: have {len(pixels)} bytes, "
+            f"expected {expected_bytes}"
+        )
+
+    pixel_count = width * height
+    sample_step = max(1, pixel_count // 20000)
+    colors: set[tuple[int, int, int]] = set()
+    bright_samples = 0
+    for pixel_index in range(0, pixel_count, sample_step):
+        offset = pixel_index * 3
+        red = pixels[offset]
+        green = pixels[offset + 1]
+        blue = pixels[offset + 2]
+        colors.add((red, green, blue))
+        if max(red, green, blue) > 180:
+            bright_samples += 1
+
+    if len(colors) < 12 or bright_samples < 8:
+        raise RuntimeError(
+            "desktop framebuffer looks blank or like a solid background: "
+            f"{len(colors)} sampled colors, {bright_samples} bright samples"
+        )
+    print(
+        f"Desktop screenshot verified: {width}x{height}, "
+        f"{len(colors)} sampled colors, visible UI details present."
+    )
+    return width, height
+
+
 def main(argv: list[str]) -> int:
-    if len(argv) != 3:
-        print(f"usage: {argv[0]} QMP_SOCKET SERIAL_LOG", file=sys.stderr)
+    if len(argv) != 4:
+        print(f"usage: {argv[0]} QMP_SOCKET SERIAL_LOG SCREENSHOT_PPM", file=sys.stderr)
         return 2
 
     socket_path = argv[1]
     log_path = Path(argv[2])
+    screenshot_path = Path(argv[3])
     client: QMPClient | None = None
     try:
         connect_deadline = time.monotonic() + CONNECT_TIMEOUT
@@ -140,31 +267,71 @@ def main(argv: list[str]) -> int:
             raise RuntimeError(f"could not connect to QMP socket: {last_error}")
 
         wait_for_log(log_path, "ASTRAOS_DISPLAY_SERVER_READY", BOOT_TIMEOUT)
-        client.send_key("t")
-        wait_for_log(log_path, "desktop: terminal window opened", EVENT_TIMEOUT)
+        wait_for_log(log_path, "ASTRAOS_POINTER_INPUT_READY", EVENT_TIMEOUT)
+        screen_width, screen_height = capture_and_verify_desktop(client, screenshot_path)
+        mouse_x = screen_width // 2
+        mouse_y = screen_height // 2
+
+        mouse_x, mouse_y = move_mouse_to(
+            client, mouse_x, mouse_y, 80, 20, screen_width, screen_height
+        )
+        click_mouse(client)
+        wait_for_log(log_path, "desktop: applications menu opened by pointer", EVENT_TIMEOUT)
+        mouse_x, mouse_y = move_mouse_to(
+            client, mouse_x, mouse_y, 80, 95, screen_width, screen_height
+        )
+        click_mouse(client)
+        wait_for_log(log_path, "desktop: terminal window opened by pointer", EVENT_TIMEOUT)
+
         type_command(client, "help")
         wait_for_log(log_path, "desktop: terminal command help", EVENT_TIMEOUT)
         type_command(client, "pwd")
         wait_for_log(log_path, "desktop: terminal command pwd", EVENT_TIMEOUT)
         type_command(client, "ls")
         wait_for_log(log_path, "desktop: terminal command ls", EVENT_TIMEOUT)
+
+        mouse_x, mouse_y = move_mouse_to(
+            client, mouse_x, mouse_y, 80, 20, screen_width, screen_height
+        )
+        click_mouse(client)
+        wait_for_log(log_path, "desktop: applications menu opened by pointer", EVENT_TIMEOUT)
+        mouse_x, mouse_y = move_mouse_to(
+            client, mouse_x, mouse_y, 80, 119, screen_width, screen_height
+        )
+        click_mouse(client)
+        wait_for_log(log_path, "desktop: file browser opened by pointer", EVENT_TIMEOUT)
+
+        file_window_width = min(720, screen_width - 40)
+        file_window_height = min(500, screen_height - 42 - 54 - 24)
+        file_x = (screen_width - file_window_width) // 2 + 24
+        file_y = 42 + 8 + (
+            screen_height - 42 - 54 - file_window_height - 16
+        ) // 2 + 20
+        file_x = min(file_x, screen_width - file_window_width - 8)
+        file_y = min(file_y, screen_height - 54 - file_window_height - 8)
+        mouse_x, mouse_y = move_mouse_to(
+            client, mouse_x, mouse_y, file_x + 220, file_y + 76,
+            screen_width, screen_height
+        )
+        click_mouse(client)
+        wait_for_log(log_path, "desktop: file selected by pointer", EVENT_TIMEOUT)
+        click_mouse(client)
+        wait_for_log(log_path, "desktop: files directory opened", EVENT_TIMEOUT)
+
+        click_mouse(client)
+        wait_for_log(log_path, "desktop: text viewer opened", EVENT_TIMEOUT)
+
+        mouse_x, mouse_y = move_mouse_to(
+            client, mouse_x, mouse_y, 280, 20, screen_width, screen_height
+        )
+        click_mouse(client)
+        wait_for_log(log_path, "desktop: task button focused by pointer", EVENT_TIMEOUT)
+        type_command(client, "whoami")
         type_command(client, "exit")
         wait_for_log(log_path, "desktop: terminal window closed", EVENT_TIMEOUT)
-        client.send_key("a")
-        wait_for_log(log_path, "desktop: about window focused", EVENT_TIMEOUT)
-        client.send_key("m")
-        wait_for_log(log_path, "desktop: applications menu opened", EVENT_TIMEOUT)
-        client.send_key("f")
-        wait_for_log(log_path, "desktop: file browser opened", EVENT_TIMEOUT)
-        client.send_key("r")
-        wait_for_log(log_path, "desktop: files refreshed", EVENT_TIMEOUT)
-        client.send_key("c")
-        wait_for_log(log_path, "desktop: window closed", EVENT_TIMEOUT)
-        client.send_key("n")
-        wait_for_log(log_path, "desktop: window minimized", EVENT_TIMEOUT)
         client.send_key("q")
         wait_for_log(log_path, "desktop: returned to shell", EVENT_TIMEOUT)
-        print("AstraOS desktop smoke test passed: compositor, shared-filesystem terminal, launcher, file manager and window controls worked.")
+        print("AstraOS desktop test passed: visible framebuffer, mouse, applications menu, taskbar, terminal and file manager.")
         return 0
     except (OSError, RuntimeError, TimeoutError, ValueError, json.JSONDecodeError) as error:
         print(f"desktop smoke test failed: {error}", file=sys.stderr)

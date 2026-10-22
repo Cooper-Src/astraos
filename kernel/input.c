@@ -24,6 +24,7 @@ typedef struct AstraFirmwareCallState {
 
 static bool g_use_serial_input = false;
 static AstraFirmwareTextInputProtocol *g_firmware_input = NULL;
+static AstraFirmwareSimplePointerProtocol *g_firmware_pointer = NULL;
 static AstraFirmwareWaitForEvent g_wait_for_event = NULL;
 static uint64_t g_firmware_exception_level = 0u;
 static uint64_t g_firmware_exception_vector = 0u;
@@ -182,6 +183,64 @@ static uint64_t firmware_wait_for_key(void) {
     return status;
 }
 
+static uint64_t firmware_read_pointer_state(AstraFirmwarePointerState *state_out) {
+    AstraFirmwareCallState state = {0};
+    uint64_t status = ASTRA_INPUT_EFI_UNSUPPORTED;
+
+    if (g_firmware_pointer == NULL || g_firmware_pointer->get_state == NULL ||
+        state_out == NULL) {
+        return ASTRA_INPUT_EFI_UNSUPPORTED;
+    }
+
+#if defined(__aarch64__)
+    if (!firmware_context_enter(&state)) {
+        return ASTRA_INPUT_EFI_UNSUPPORTED;
+    }
+    status = g_firmware_pointer->get_state(g_firmware_pointer, state_out);
+    firmware_context_leave(&state);
+#else
+    (void)state;
+    (void)state_out;
+#endif
+    return status;
+}
+
+/* Wait on keyboard and mouse together, rather than sleeping on the keyboard alone. */
+static bool firmware_wait_for_activity(void) {
+    AstraFirmwareCallState state = {0};
+    void *events[2];
+    uint64_t event_count = 0u;
+    uint64_t event_index = UINT64_MAX;
+    uint64_t status = ASTRA_INPUT_EFI_UNSUPPORTED;
+
+    if (g_firmware_input != NULL && g_firmware_input->wait_for_key != NULL) {
+        events[event_count] = g_firmware_input->wait_for_key;
+        event_count++;
+    }
+    if (g_firmware_pointer != NULL && g_firmware_pointer->wait_for_input != NULL &&
+        event_count < UINT64_C(2)) {
+        events[event_count] = g_firmware_pointer->wait_for_input;
+        event_count++;
+    }
+    if (event_count == 0u || g_wait_for_event == NULL) {
+        return false;
+    }
+
+#if defined(__aarch64__)
+    if (!firmware_context_enter(&state)) {
+        return false;
+    }
+    status = g_wait_for_event(event_count, events, &event_index);
+    firmware_context_leave(&state);
+#else
+    (void)state;
+    (void)events;
+    (void)event_index;
+#endif
+
+    return status == ASTRA_INPUT_EFI_SUCCESS && event_index < event_count;
+}
+
 bool astra_input_translate_key(uint16_t unicode_char, uint8_t *byte_out) {
     if (byte_out == NULL || unicode_char == 0u ||
         unicode_char > (uint16_t)ASTRA_INPUT_ASCII_MAX) {
@@ -195,6 +254,7 @@ bool astra_input_translate_key(uint16_t unicode_char, uint8_t *byte_out) {
 bool astra_input_initialize(const AstraBootInfo *boot_info, bool serial_ready) {
     g_use_serial_input = false;
     g_firmware_input = NULL;
+    g_firmware_pointer = NULL;
     g_wait_for_event = NULL;
     g_firmware_exception_level = 0u;
     g_firmware_exception_vector = 0u;
@@ -216,6 +276,12 @@ bool astra_input_initialize(const AstraBootInfo *boot_info, bool serial_ready) {
             (uint64_t)ASTRA_INPUT_VBAR_ALIGNMENT_MASK) == 0u) {
         g_firmware_input = boot_info->firmware_input_protocol;
         g_wait_for_event = boot_info->firmware_wait_for_event;
+        if ((boot_info->flags & ASTRA_BOOT_FLAG_UEFI_POINTER_INPUT) != 0u &&
+            boot_info->firmware_pointer_protocol != NULL &&
+            boot_info->firmware_pointer_protocol->get_state != NULL &&
+            boot_info->firmware_pointer_protocol->wait_for_input != NULL) {
+            g_firmware_pointer = boot_info->firmware_pointer_protocol;
+        }
         g_firmware_exception_level = boot_info->firmware_exception_level;
         g_firmware_exception_vector = boot_info->firmware_exception_vector;
         g_firmware_daif = boot_info->firmware_daif;
@@ -268,6 +334,72 @@ bool astra_input_read_byte(uint8_t *byte_out) {
 
         status = firmware_wait_for_key();
         if (status != ASTRA_INPUT_EFI_SUCCESS) {
+            return false;
+        }
+    }
+}
+
+bool astra_input_pointer_available(void) {
+    return g_firmware_pointer != NULL;
+}
+
+static void input_event_clear(AstraInputEvent *event_out) {
+    event_out->kind = ASTRA_INPUT_EVENT_NONE;
+    event_out->key = 0u;
+    event_out->delta_x = 0;
+    event_out->delta_y = 0;
+    event_out->delta_z = 0;
+    event_out->left_button = false;
+    event_out->right_button = false;
+}
+
+bool astra_input_read_event(AstraInputEvent *event_out) {
+    if (event_out == NULL) {
+        return false;
+    }
+    input_event_clear(event_out);
+
+    if (g_use_serial_input) {
+        event_out->key = astra_uart_get_byte();
+        event_out->kind = ASTRA_INPUT_EVENT_KEY;
+        return true;
+    }
+    if (g_firmware_input == NULL || g_wait_for_event == NULL) {
+        return false;
+    }
+
+    for (;;) {
+        AstraFirmwareInputKey key = {0};
+        uint64_t status = firmware_read_key(&key);
+
+        if (status == ASTRA_INPUT_EFI_SUCCESS) {
+            if (astra_input_translate_key(key.unicode_char, &event_out->key)) {
+                event_out->kind = ASTRA_INPUT_EVENT_KEY;
+                return true;
+            }
+        } else if (status != ASTRA_INPUT_EFI_NOT_READY) {
+            return false;
+        }
+
+        if (g_firmware_pointer != NULL) {
+            AstraFirmwarePointerState pointer_state;
+            status = firmware_read_pointer_state(&pointer_state);
+            if (status == ASTRA_INPUT_EFI_SUCCESS) {
+                event_out->kind = ASTRA_INPUT_EVENT_POINTER;
+                event_out->delta_x = pointer_state.relative_movement_x;
+                event_out->delta_y = pointer_state.relative_movement_y;
+                event_out->delta_z = pointer_state.relative_movement_z;
+                event_out->left_button = pointer_state.left_button != 0u;
+                event_out->right_button = pointer_state.right_button != 0u;
+                return true;
+            }
+            if (status != ASTRA_INPUT_EFI_NOT_READY &&
+                status != ASTRA_INPUT_EFI_UNSUPPORTED) {
+                g_firmware_pointer = NULL;
+            }
+        }
+
+        if (!firmware_wait_for_activity()) {
             return false;
         }
     }
