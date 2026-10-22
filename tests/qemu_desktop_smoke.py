@@ -25,6 +25,8 @@ class QMPClient:
         self._socket = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         self._buffer = bytearray()
         self._next_id = 1
+        self._pointer_x: int | None = None
+        self._pointer_y: int | None = None
         try:
             self._socket.settimeout(CONNECT_TIMEOUT)
             self._socket.connect(socket_path)
@@ -83,24 +85,32 @@ class QMPClient:
     def send_key(self, key: str) -> None:
         self.execute("human-monitor-command", {"command-line": f"sendkey {key}"})
 
-    def pointer_position(self, x: int, y: int, width: int, height: int) -> None:
-        """Inject absolute pointer coordinates via QMP into the guest input path."""
+    def move_pointer_to(self, x: int, y: int, width: int, height: int) -> None:
+        """Move the USB relative mouse; UEFI Simple Pointer reports movement in device units."""
         if width < 2 or height < 2:
-            raise ValueError("framebuffer dimensions are too small for pointer injection")
+            raise ValueError("framebuffer dimensions are too small for pointer input")
         x = max(0, min(x, width - 1))
         y = max(0, min(y, height - 1))
-        absolute_x = x * 0x7FFFF // (width - 1)
-        absolute_y = y * 0x7FFFF // (height - 1)
-        self.execute(
-            "input-send-event",
-            {
-                "events": [
-                    {"type": "abs", "data": {"axis": "x", "value": absolute_x}},
-                    {"type": "abs", "data": {"axis": "y", "value": absolute_y}},
-                ]
-            },
-        )
-        time.sleep(0.15)
+        if self._pointer_x is None or self._pointer_y is None:
+            self._pointer_x = width // 2
+            self._pointer_y = height // 2
+        delta_x = x - self._pointer_x
+        delta_y = y - self._pointer_y
+        relative_x = int(delta_x / 2)
+        relative_y = int(delta_y / 2)
+        if relative_x != 0 or relative_y != 0:
+            self.execute(
+                "input-send-event",
+                {
+                    "events": [
+                        {"type": "rel", "data": {"axis": "x", "value": relative_x}},
+                        {"type": "rel", "data": {"axis": "y", "value": relative_y}},
+                    ]
+                },
+            )
+            self._pointer_x = max(0, min(width - 1, self._pointer_x + relative_x * 2))
+            self._pointer_y = max(0, min(height - 1, self._pointer_y + relative_y * 2))
+        time.sleep(0.2)
 
     def mouse_button(self, down: bool) -> None:
         self.execute(
@@ -110,7 +120,7 @@ class QMPClient:
         time.sleep(0.15)
 
     def click(self, x: int, y: int, width: int, height: int) -> None:
-        self.pointer_position(x, y, width, height)
+        self.move_pointer_to(x, y, width, height)
         self.mouse_button(True)
         self.mouse_button(False)
 
