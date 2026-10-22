@@ -20,6 +20,13 @@ typedef struct AstraInputEvent {
     int32_t delta_z;
     bool left_button;
     bool right_button;
+    bool absolute;
+    uint64_t absolute_x;
+    uint64_t absolute_y;
+    uint64_t absolute_min_x;
+    uint64_t absolute_max_x;
+    uint64_t absolute_min_y;
+    uint64_t absolute_max_y;
 } AstraInputEvent;
 
 /* Selects firmware keyboard input when requested, otherwise a detected UART. */

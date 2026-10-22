@@ -1592,26 +1592,67 @@ static bool handle_pointer_press(void) {
     return false;
 }
 
+static uint32_t map_absolute_axis(
+    uint64_t value,
+    uint64_t minimum,
+    uint64_t maximum,
+    uint32_t last_pixel
+) {
+    uint64_t range = 0u;
+    uint64_t offset = 0u;
+    uint64_t pixel = 0u;
+
+    if (maximum <= minimum || maximum - minimum > UINT32_MAX) {
+        return 0u;
+    }
+    if (value <= minimum) {
+        return 0u;
+    }
+    if (value >= maximum) {
+        return last_pixel;
+    }
+
+    range = maximum - minimum;
+    offset = value - minimum;
+    pixel = (offset * (uint64_t)last_pixel + range / 2u) / range;
+    if (pixel > (uint64_t)last_pixel) {
+        pixel = (uint64_t)last_pixel;
+    }
+    return (uint32_t)pixel;
+}
+
 static bool handle_pointer_event(const AstraInputEvent *event) {
     const bool left_was_down = g_pointer_left_down;
-    int64_t next_x = (int64_t)g_pointer_x +
-        (int64_t)event->delta_x * (int64_t)DISPLAY_POINTER_SCALE;
-    int64_t next_y = (int64_t)g_pointer_y +
-        (int64_t)event->delta_y * (int64_t)DISPLAY_POINTER_SCALE;
 
-    if (next_x < 0) {
-        g_pointer_x = 0u;
-    } else if (next_x >= (int64_t)g_screen_width) {
-        g_pointer_x = g_screen_width - 1u;
+    if (event->absolute) {
+        g_pointer_x = map_absolute_axis(
+            event->absolute_x, event->absolute_min_x, event->absolute_max_x,
+            g_screen_width - 1u
+        );
+        g_pointer_y = map_absolute_axis(
+            event->absolute_y, event->absolute_min_y, event->absolute_max_y,
+            g_screen_height - 1u
+        );
     } else {
-        g_pointer_x = (uint32_t)next_x;
-    }
-    if (next_y < 0) {
-        g_pointer_y = 0u;
-    } else if (next_y >= (int64_t)g_screen_height) {
-        g_pointer_y = g_screen_height - 1u;
-    } else {
-        g_pointer_y = (uint32_t)next_y;
+        int64_t next_x = (int64_t)g_pointer_x +
+            (int64_t)event->delta_x * (int64_t)DISPLAY_POINTER_SCALE;
+        int64_t next_y = (int64_t)g_pointer_y +
+            (int64_t)event->delta_y * (int64_t)DISPLAY_POINTER_SCALE;
+
+        if (next_x < 0) {
+            g_pointer_x = 0u;
+        } else if (next_x >= (int64_t)g_screen_width) {
+            g_pointer_x = g_screen_width - 1u;
+        } else {
+            g_pointer_x = (uint32_t)next_x;
+        }
+        if (next_y < 0) {
+            g_pointer_y = 0u;
+        } else if (next_y >= (int64_t)g_screen_height) {
+            g_pointer_y = g_screen_height - 1u;
+        } else {
+            g_pointer_y = (uint32_t)next_y;
+        }
     }
 
     if (g_drag_active && event->left_button) {

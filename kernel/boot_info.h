@@ -4,13 +4,14 @@
 #include <stdint.h>
 
 #define ASTRA_BOOT_INFO_MAGIC UINT64_C(0x4153545241424f4f)
-#define ASTRA_BOOT_INFO_VERSION UINT64_C(6)
+#define ASTRA_BOOT_INFO_VERSION UINT64_C(7)
 #define ASTRA_BOOT_MEMORY_MAP_CAP_BYTES (UINT64_C(16384) * UINT64_C(8))
 
 #define ASTRA_BOOT_FLAG_BOOT_SERVICES_ACTIVE (UINT64_C(1) << 0u)
 #define ASTRA_BOOT_FLAG_UEFI_TEXT_INPUT (UINT64_C(1) << 1u)
 #define ASTRA_BOOT_FLAG_DESKTOP_MODE (UINT64_C(1) << 2u)
 #define ASTRA_BOOT_FLAG_UEFI_POINTER_INPUT (UINT64_C(1) << 3u)
+#define ASTRA_BOOT_FLAG_UEFI_ABSOLUTE_POINTER_INPUT (UINT64_C(1) << 4u)
 
 typedef struct AstraFirmwareInputKey {
     uint16_t scan_code;
@@ -69,6 +70,48 @@ struct AstraFirmwareSimplePointerProtocol {
     void *mode;
 };
 
+
+enum {
+    ASTRA_ABSOLUTE_POINTER_BUTTON_TOUCH_ACTIVE = 1u << 0,
+    ASTRA_ABSOLUTE_POINTER_BUTTON_ALT_ACTIVE = 1u << 1
+};
+
+/* UEFI Absolute Pointer Protocol state and mode, borrowed from firmware. */
+typedef struct AstraFirmwareAbsolutePointerState {
+    uint64_t current_x;
+    uint64_t current_y;
+    uint64_t current_z;
+    uint32_t active_buttons;
+} AstraFirmwareAbsolutePointerState;
+
+typedef struct AstraFirmwareAbsolutePointerMode {
+    uint64_t absolute_min_x;
+    uint64_t absolute_min_y;
+    uint64_t absolute_min_z;
+    uint64_t absolute_max_x;
+    uint64_t absolute_max_y;
+    uint64_t absolute_max_z;
+    uint64_t attributes;
+} AstraFirmwareAbsolutePointerMode;
+
+typedef struct AstraFirmwareAbsolutePointerProtocol AstraFirmwareAbsolutePointerProtocol;
+
+typedef uint64_t (*AstraFirmwareAbsolutePointerReset)(
+    AstraFirmwareAbsolutePointerProtocol *protocol,
+    uint8_t extended_verification
+);
+typedef uint64_t (*AstraFirmwareAbsolutePointerGetState)(
+    AstraFirmwareAbsolutePointerProtocol *protocol,
+    AstraFirmwareAbsolutePointerState *state_out
+);
+
+struct AstraFirmwareAbsolutePointerProtocol {
+    AstraFirmwareAbsolutePointerReset reset;
+    AstraFirmwareAbsolutePointerGetState get_state;
+    void *wait_for_input;
+    AstraFirmwareAbsolutePointerMode *mode;
+};
+
 typedef struct AstraBootInfo {
     uint64_t magic;
     uint64_t version;
@@ -101,6 +144,7 @@ typedef struct AstraBootInfo {
     uint64_t firmware_exception_vector;
     uint64_t firmware_daif;
     AstraFirmwareSimplePointerProtocol *firmware_pointer_protocol;
+    AstraFirmwareAbsolutePointerProtocol *firmware_absolute_pointer_protocol;
 } AstraBootInfo;
 
 /* Called by the AArch64 entry assembly after the stack is installed. */

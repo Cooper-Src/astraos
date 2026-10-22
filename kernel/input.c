@@ -25,6 +25,7 @@ typedef struct AstraFirmwareCallState {
 static bool g_use_serial_input = false;
 static AstraFirmwareTextInputProtocol *g_firmware_input = NULL;
 static AstraFirmwareSimplePointerProtocol *g_firmware_pointer = NULL;
+static AstraFirmwareAbsolutePointerProtocol *g_firmware_absolute_pointer = NULL;
 static AstraFirmwareWaitForEvent g_wait_for_event = NULL;
 static uint64_t g_firmware_exception_level = 0u;
 static uint64_t g_firmware_exception_vector = 0u;
@@ -208,8 +209,8 @@ static uint64_t firmware_read_pointer_state(AstraFirmwarePointerState *state_out
 /* Wait on keyboard and mouse together, rather than sleeping on the keyboard alone. */
 static bool firmware_wait_for_activity(void) {
     AstraFirmwareCallState state = {0};
-    void *events[2];
-    uint64_t event_count = 0u;
+    void *events[3];
+    size_t event_count = 0u;
     uint64_t event_index = UINT64_MAX;
     uint64_t status = ASTRA_INPUT_EFI_UNSUPPORTED;
 
@@ -217,9 +218,13 @@ static bool firmware_wait_for_activity(void) {
         events[event_count] = g_firmware_input->wait_for_key;
         event_count++;
     }
-    if (g_firmware_pointer != NULL && g_firmware_pointer->wait_for_input != NULL &&
-        event_count < UINT64_C(2)) {
+    if (g_firmware_pointer != NULL && g_firmware_pointer->wait_for_input != NULL) {
         events[event_count] = g_firmware_pointer->wait_for_input;
+        event_count++;
+    }
+    if (g_firmware_absolute_pointer != NULL &&
+        g_firmware_absolute_pointer->wait_for_input != NULL) {
+        events[event_count] = g_firmware_absolute_pointer->wait_for_input;
         event_count++;
     }
     if (event_count == 0u || g_wait_for_event == NULL) {
@@ -230,7 +235,7 @@ static bool firmware_wait_for_activity(void) {
     if (!firmware_context_enter(&state)) {
         return false;
     }
-    status = g_wait_for_event(event_count, events, &event_index);
+    status = g_wait_for_event((uint64_t)event_count, events, &event_index);
     firmware_context_leave(&state);
 #else
     (void)state;
@@ -238,7 +243,33 @@ static bool firmware_wait_for_activity(void) {
     (void)event_index;
 #endif
 
-    return status == ASTRA_INPUT_EFI_SUCCESS && event_index < event_count;
+    return status == ASTRA_INPUT_EFI_SUCCESS && event_index < (uint64_t)event_count;
+}
+
+static uint64_t firmware_read_absolute_pointer_state(
+    AstraFirmwareAbsolutePointerState *state_out
+) {
+    AstraFirmwareCallState state = {0};
+    uint64_t status = ASTRA_INPUT_EFI_UNSUPPORTED;
+
+    if (g_firmware_absolute_pointer == NULL ||
+        g_firmware_absolute_pointer->get_state == NULL || state_out == NULL) {
+        return ASTRA_INPUT_EFI_UNSUPPORTED;
+    }
+
+#if defined(__aarch64__)
+    if (!firmware_context_enter(&state)) {
+        return ASTRA_INPUT_EFI_UNSUPPORTED;
+    }
+    status = g_firmware_absolute_pointer->get_state(
+        g_firmware_absolute_pointer, state_out
+    );
+    firmware_context_leave(&state);
+#else
+    (void)state;
+    (void)state_out;
+#endif
+    return status;
 }
 
 bool astra_input_translate_key(uint16_t unicode_char, uint8_t *byte_out) {
@@ -255,6 +286,7 @@ bool astra_input_initialize(const AstraBootInfo *boot_info, bool serial_ready) {
     g_use_serial_input = false;
     g_firmware_input = NULL;
     g_firmware_pointer = NULL;
+    g_firmware_absolute_pointer = NULL;
     g_wait_for_event = NULL;
     g_firmware_exception_level = 0u;
     g_firmware_exception_vector = 0u;
@@ -281,6 +313,23 @@ bool astra_input_initialize(const AstraBootInfo *boot_info, bool serial_ready) {
             boot_info->firmware_pointer_protocol->get_state != NULL &&
             boot_info->firmware_pointer_protocol->wait_for_input != NULL) {
             g_firmware_pointer = boot_info->firmware_pointer_protocol;
+        }
+        if ((boot_info->flags & ASTRA_BOOT_FLAG_UEFI_ABSOLUTE_POINTER_INPUT) != 0u &&
+            boot_info->firmware_absolute_pointer_protocol != NULL &&
+            boot_info->firmware_absolute_pointer_protocol->get_state != NULL &&
+            boot_info->firmware_absolute_pointer_protocol->wait_for_input != NULL &&
+            boot_info->firmware_absolute_pointer_protocol->mode != NULL &&
+            boot_info->firmware_absolute_pointer_protocol->mode->absolute_max_x >
+                boot_info->firmware_absolute_pointer_protocol->mode->absolute_min_x &&
+            boot_info->firmware_absolute_pointer_protocol->mode->absolute_max_y >
+                boot_info->firmware_absolute_pointer_protocol->mode->absolute_min_y &&
+            boot_info->firmware_absolute_pointer_protocol->mode->absolute_max_x -
+                boot_info->firmware_absolute_pointer_protocol->mode->absolute_min_x <=
+                UINT32_MAX &&
+            boot_info->firmware_absolute_pointer_protocol->mode->absolute_max_y -
+                boot_info->firmware_absolute_pointer_protocol->mode->absolute_min_y <=
+                UINT32_MAX) {
+            g_firmware_absolute_pointer = boot_info->firmware_absolute_pointer_protocol;
         }
         g_firmware_exception_level = boot_info->firmware_exception_level;
         g_firmware_exception_vector = boot_info->firmware_exception_vector;
@@ -340,7 +389,7 @@ bool astra_input_read_byte(uint8_t *byte_out) {
 }
 
 bool astra_input_pointer_available(void) {
-    return g_firmware_pointer != NULL;
+    return g_firmware_pointer != NULL || g_firmware_absolute_pointer != NULL;
 }
 
 static void input_event_clear(AstraInputEvent *event_out) {
@@ -351,6 +400,13 @@ static void input_event_clear(AstraInputEvent *event_out) {
     event_out->delta_z = 0;
     event_out->left_button = false;
     event_out->right_button = false;
+    event_out->absolute = false;
+    event_out->absolute_x = UINT64_C(0);
+    event_out->absolute_y = UINT64_C(0);
+    event_out->absolute_min_x = UINT64_C(0);
+    event_out->absolute_max_x = UINT64_C(0);
+    event_out->absolute_min_y = UINT64_C(0);
+    event_out->absolute_max_y = UINT64_C(0);
 }
 
 bool astra_input_read_event(AstraInputEvent *event_out) {
@@ -379,6 +435,38 @@ bool astra_input_read_event(AstraInputEvent *event_out) {
             }
         } else if (status != ASTRA_INPUT_EFI_NOT_READY) {
             return false;
+        }
+
+        /*
+         * Prefer absolute coordinates when available; firmware-backed tablets
+         * can then position the cursor exactly in graphical frontends such as VNC.
+         */
+        if (g_firmware_absolute_pointer != NULL) {
+            AstraFirmwareAbsolutePointerState pointer_state;
+            const AstraFirmwareAbsolutePointerMode *mode =
+                g_firmware_absolute_pointer->mode;
+            status = firmware_read_absolute_pointer_state(&pointer_state);
+            if (status == ASTRA_INPUT_EFI_SUCCESS) {
+                event_out->kind = ASTRA_INPUT_EVENT_POINTER;
+                event_out->absolute = true;
+                event_out->absolute_x = pointer_state.current_x;
+                event_out->absolute_y = pointer_state.current_y;
+                event_out->absolute_min_x = mode->absolute_min_x;
+                event_out->absolute_max_x = mode->absolute_max_x;
+                event_out->absolute_min_y = mode->absolute_min_y;
+                event_out->absolute_max_y = mode->absolute_max_y;
+                event_out->left_button =
+                    (pointer_state.active_buttons &
+                        (uint32_t)ASTRA_ABSOLUTE_POINTER_BUTTON_TOUCH_ACTIVE) != 0u;
+                event_out->right_button =
+                    (pointer_state.active_buttons &
+                        (uint32_t)ASTRA_ABSOLUTE_POINTER_BUTTON_ALT_ACTIVE) != 0u;
+                return true;
+            }
+            if (status != ASTRA_INPUT_EFI_NOT_READY &&
+                status != ASTRA_INPUT_EFI_UNSUPPORTED) {
+                g_firmware_absolute_pointer = NULL;
+            }
         }
 
         if (g_firmware_pointer != NULL) {
