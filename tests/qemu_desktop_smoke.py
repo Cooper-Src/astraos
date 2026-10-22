@@ -216,10 +216,13 @@ def main(argv: list[str]) -> int:
 
         # QEMU starts the pointer at the centre. Move to the top-left corner,
         # then to the Applications launcher and click it using guest mouse events.
-        for _ in range(8):
+        for _ in range(48):
             client.send_pointer_motion(-100, -100)
-            time.sleep(0.08)
-        client.send_pointer_motion(35, 10)  # pointer accelerates by 2x in the compositor
+            time.sleep(0.04)
+        wait_for_log(log_path, "ASTRAOS_POINTER_EVENT_RECEIVED", EVENT_TIMEOUT)
+        # From the corner, this movement stays within the Applications hitbox
+        # across common firmware pointer sensitivities.
+        client.send_pointer_motion(20, 5)
         time.sleep(0.15)
         client.click()
         wait_for_log(log_path, "desktop: applications menu opened by pointer", EVENT_TIMEOUT)
