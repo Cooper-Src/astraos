@@ -30,8 +30,10 @@ static void *g_firmware_poll_event = NULL;
 static uint64_t g_firmware_exception_level = 0u;
 static uint64_t g_firmware_exception_vector = 0u;
 static uint64_t g_firmware_daif = 0u;
+#if defined(__aarch64__)
 static uint32_t g_input_debug_waits = 0u;
 static uint32_t g_input_debug_pointer_polls = 0u;
+#endif
 
 #if defined(__aarch64__)
 /* Firmware services need their original vector table and an unmasked IRQ path. */
