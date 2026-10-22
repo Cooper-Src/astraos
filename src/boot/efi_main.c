@@ -127,7 +127,7 @@ struct EFI_BOOT_SERVICES {
     void *UnloadImage;
     EFI_EXIT_BOOT_SERVICES ExitBootServices;
     void *GetNextMonotonicCount;
-    void *Stall;
+    AstraFirmwareStall Stall;
     void *SetWatchdogTimer;
     void *ConnectController;
     void *DisconnectController;
@@ -1026,26 +1026,32 @@ static void capture_framebuffer(EFI_BOOT_SERVICES *boot_services, AstraBootInfo 
 /* Capture a firmware-owned pointer protocol only for the Boot-Services desktop path. */
 
 /* Capture firmware-owned pointer protocols for the UEFI desktop session. */
+
+/*
+ * UEFI pointer WaitForInput events can be unreliable on QEMU firmware. Polling
+ * GetState from the kernel avoids blocking forever on a non-signalling event.
+ */
 static void capture_firmware_pointer(
     EFI_BOOT_SERVICES *boot_services,
     AstraBootInfo *boot_info
 ) {
     EFI_STATUS status = EFI_UNSUPPORTED;
     void *interface = NULL;
-    bool found_pointer = false;
-    AstraFirmwareSimplePointerProtocol *relative_pointer = NULL;
     AstraFirmwareAbsolutePointerProtocol *absolute_pointer = NULL;
+    AstraFirmwareSimplePointerProtocol *relative_pointer = NULL;
 
     if (boot_services == NULL || boot_info == NULL ||
-        boot_services->LocateProtocol == NULL) {
+        boot_services->LocateProtocol == NULL || boot_services->Stall == NULL) {
+        loader_out(L"UEFI polling service unavailable; mouse input is disabled.\r\n");
         return;
     }
+    boot_info->firmware_stall = boot_services->Stall;
 
     status = boot_services->LocateProtocol(&g_absolute_pointer_guid, NULL, &interface);
     if (status == EFI_SUCCESS && interface != NULL) {
         absolute_pointer = (AstraFirmwareAbsolutePointerProtocol *)interface;
-        if (absolute_pointer->get_state != NULL &&
-            absolute_pointer->wait_for_input != NULL &&
+        if (absolute_pointer->reset != NULL &&
+            absolute_pointer->get_state != NULL &&
             absolute_pointer->mode != NULL &&
             absolute_pointer->mode->absolute_max_x >
                 absolute_pointer->mode->absolute_min_x &&
@@ -1055,10 +1061,14 @@ static void capture_firmware_pointer(
                 absolute_pointer->mode->absolute_min_x <= UINT32_MAX &&
             absolute_pointer->mode->absolute_max_y -
                 absolute_pointer->mode->absolute_min_y <= UINT32_MAX) {
+            status = absolute_pointer->reset(absolute_pointer, 0u);
+            if (status != EFI_SUCCESS) {
+                loader_out(L"Warning: UEFI absolute pointer reset failed; trying polling anyway.\r\n");
+            }
             boot_info->firmware_absolute_pointer_protocol = absolute_pointer;
             boot_info->flags |= ASTRA_BOOT_FLAG_UEFI_ABSOLUTE_POINTER_INPUT;
-            found_pointer = true;
-            loader_out(L"UEFI Absolute Pointer Protocol found; absolute mouse input is enabled.\r\n");
+            loader_out(L"UEFI Absolute Pointer Protocol found; polling absolute mouse input.\r\n");
+            return;
         }
     }
 
@@ -1066,18 +1076,21 @@ static void capture_firmware_pointer(
     status = boot_services->LocateProtocol(&g_simple_pointer_guid, NULL, &interface);
     if (status == EFI_SUCCESS && interface != NULL) {
         relative_pointer = (AstraFirmwareSimplePointerProtocol *)interface;
-        if (relative_pointer->get_state != NULL &&
-            relative_pointer->wait_for_input != NULL) {
+        if (relative_pointer->reset != NULL &&
+            relative_pointer->get_state != NULL) {
+            status = relative_pointer->reset(relative_pointer, 0u);
+            if (status != EFI_SUCCESS) {
+                loader_out(L"Warning: UEFI simple pointer reset failed; trying polling anyway.\r\n");
+            }
             boot_info->firmware_pointer_protocol = relative_pointer;
             boot_info->flags |= ASTRA_BOOT_FLAG_UEFI_POINTER_INPUT;
-            found_pointer = true;
-            loader_out(L"UEFI Simple Pointer Protocol found; relative mouse input is enabled.\r\n");
+            loader_out(L"UEFI Simple Pointer Protocol found; polling relative mouse input.\r\n");
+            return;
         }
     }
 
-    if (!found_pointer) {
-        loader_out(L"No supported UEFI pointer protocol found; mouse input is unavailable.\r\n");
-    }
+    boot_info->firmware_stall = NULL;
+    loader_out(L"No supported UEFI pointer protocol found; mouse input is unavailable.\r\n");
 }
 
 static void stop_forever(void) {
@@ -1178,6 +1191,7 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *system_table) {
     g_boot_info.firmware_daif = 0u;
     g_boot_info.firmware_pointer_protocol = NULL;
     g_boot_info.firmware_absolute_pointer_protocol = NULL;
+    g_boot_info.firmware_stall = NULL;
 
     if (keyboard_console_mode_requested(image, system_table)) {
         if (configure_firmware_keyboard_console(&g_boot_info, system_table)) {
