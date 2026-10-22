@@ -30,8 +30,6 @@ static void *g_firmware_poll_event = NULL;
 static uint64_t g_firmware_exception_level = 0u;
 static uint64_t g_firmware_exception_vector = 0u;
 static uint64_t g_firmware_daif = 0u;
-static uint32_t g_input_debug_waits = 0u;
-static uint32_t g_input_debug_pointer_polls = 0u;
 
 #if defined(__aarch64__)
 /* Firmware services need their original vector table and an unmasked IRQ path. */
@@ -59,7 +57,7 @@ static bool firmware_context_enter(AstraFirmwareCallState *state) {
             : "r"(g_firmware_exception_vector), "r"(g_firmware_daif)
             : "memory"
         );
-        return true;
+            return true;
     }
     if (g_firmware_exception_level == UINT64_C(2)) {
         __asm__ volatile(
@@ -78,7 +76,7 @@ static bool firmware_context_enter(AstraFirmwareCallState *state) {
             : "r"(g_firmware_exception_vector), "r"(g_firmware_daif)
             : "memory"
         );
-        return true;
+            return true;
     }
     return false;
 }
@@ -221,7 +219,7 @@ bool astra_input_translate_key(uint16_t unicode_char, uint8_t *byte_out) {
         return false;
     }
     *byte_out = (uint8_t)unicode_char;
-    return true;
+            return true;
 }
 
 bool astra_input_initialize(const AstraBootInfo *boot_info, bool serial_ready) {
@@ -234,8 +232,6 @@ bool astra_input_initialize(const AstraBootInfo *boot_info, bool serial_ready) {
     g_firmware_exception_level = 0u;
     g_firmware_exception_vector = 0u;
     g_firmware_daif = 0u;
-    g_input_debug_waits = 0u;
-    g_input_debug_pointer_polls = 0u;
 
     if (boot_info != NULL &&
         boot_info->magic == ASTRA_BOOT_INFO_MAGIC &&
@@ -279,12 +275,12 @@ bool astra_input_initialize(const AstraBootInfo *boot_info, bool serial_ready) {
                 g_absolute_pointer = boot_info->firmware_absolute_pointer_protocol;
             }
         }
-        return true;
+            return true;
 #endif
     }
     if (serial_ready) {
         g_use_serial_input = true;
-        return true;
+            return true;
     }
     return false;
 }
@@ -314,7 +310,7 @@ bool astra_input_read_event(AstraInputEvent *event_out) {
     if (g_use_serial_input) {
         event_out->key = astra_uart_get_byte();
         event_out->kind = ASTRA_INPUT_EVENT_KEY;
-        return true;
+            return true;
     }
     if (g_firmware_input == NULL || g_wait_for_event == NULL) {
         return false;
@@ -332,7 +328,7 @@ bool astra_input_read_event(AstraInputEvent *event_out) {
             if (astra_input_translate_key(key.unicode_char, &translated)) {
                 event_out->kind = ASTRA_INPUT_EVENT_KEY;
                 event_out->key = translated;
-                return true;
+            return true;
             }
         } else if (status != ASTRA_INPUT_EFI_NOT_READY &&
             status != ASTRA_INPUT_EFI_UNSUPPORTED) {
@@ -363,13 +359,6 @@ bool astra_input_read_event(AstraInputEvent *event_out) {
             if (g_simple_pointer != NULL) {
                 simple_status = firmware_read_simple_pointer(&simple_state);
                 simple_ready = simple_status == ASTRA_INPUT_EFI_SUCCESS;
-                if (simple_status == ASTRA_INPUT_EFI_NOT_READY &&
-                    g_input_debug_pointer_polls < 4u) {
-                    g_input_debug_pointer_polls++;
-                    astra_uart_puts("desktop: UEFI Simple Pointer not ready poll=");
-                    astra_uart_put_u32(g_input_debug_pointer_polls);
-                    astra_uart_puts("\n");
-                }
                 if (simple_status != ASTRA_INPUT_EFI_NOT_READY &&
                     simple_status != ASTRA_INPUT_EFI_SUCCESS &&
                     simple_status != ASTRA_INPUT_EFI_UNSUPPORTED) {
@@ -387,13 +376,6 @@ bool astra_input_read_event(AstraInputEvent *event_out) {
                 absolute_status = firmware_read_absolute_pointer(&absolute_state);
                 absolute_ready = absolute_status == ASTRA_INPUT_EFI_SUCCESS &&
                     mode != NULL;
-                if (absolute_status == ASTRA_INPUT_EFI_NOT_READY &&
-                    g_input_debug_pointer_polls < 8u) {
-                    g_input_debug_pointer_polls++;
-                    astra_uart_puts("desktop: UEFI Absolute Pointer not ready poll=");
-                    astra_uart_put_u32(g_input_debug_pointer_polls);
-                    astra_uart_puts("\n");
-                }
                 if (absolute_status != ASTRA_INPUT_EFI_NOT_READY &&
                     absolute_status != ASTRA_INPUT_EFI_SUCCESS &&
                     absolute_status != ASTRA_INPUT_EFI_UNSUPPORTED) {
@@ -417,7 +399,7 @@ bool astra_input_read_event(AstraInputEvent *event_out) {
                 event_out->right_button_down = simple_ready ?
                     simple_state.right_button != 0u :
                     (absolute_state.active_buttons & UINT32_C(2)) != 0u;
-return true;
+            return true;
             }
 
             if (simple_ready) {
@@ -426,7 +408,7 @@ return true;
                 event_out->delta_y = simple_state.relative_y;
                 event_out->left_button_down = simple_state.left_button != 0u;
                 event_out->right_button_down = simple_state.right_button != 0u;
-return true;
+            return true;
             }
         }
 
@@ -451,16 +433,6 @@ return true;
             }
 
             status = firmware_wait_for_events(events, event_count, &event_index);
-            if (g_input_debug_waits < 8u) {
-                g_input_debug_waits++;
-                astra_uart_puts("desktop: UEFI WaitForEvent index=");
-                astra_uart_put_u32((uint32_t)event_index);
-                astra_uart_puts(" status=");
-                astra_uart_put_u32((uint32_t)status);
-                astra_uart_puts(" count=");
-                astra_uart_put_u32((uint32_t)event_count);
-                astra_uart_puts("\n");
-            }
             if (status != ASTRA_INPUT_EFI_SUCCESS || event_index >= event_count) {
                 return false;
             }
