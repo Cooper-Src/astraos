@@ -4,12 +4,14 @@
 #include <stdint.h>
 
 #define ASTRA_BOOT_INFO_MAGIC UINT64_C(0x4153545241424f4f)
-#define ASTRA_BOOT_INFO_VERSION UINT64_C(5)
+#define ASTRA_BOOT_INFO_VERSION UINT64_C(8)
 #define ASTRA_BOOT_MEMORY_MAP_CAP_BYTES (UINT64_C(16384) * UINT64_C(8))
 
 #define ASTRA_BOOT_FLAG_BOOT_SERVICES_ACTIVE (UINT64_C(1) << 0u)
 #define ASTRA_BOOT_FLAG_UEFI_TEXT_INPUT (UINT64_C(1) << 1u)
 #define ASTRA_BOOT_FLAG_DESKTOP_MODE (UINT64_C(1) << 2u)
+#define ASTRA_BOOT_FLAG_UEFI_POINTER_INPUT (UINT64_C(1) << 3u)
+#define ASTRA_BOOT_FLAG_UEFI_ABSOLUTE_POINTER_INPUT (UINT64_C(1) << 4u)
 
 typedef struct AstraFirmwareInputKey {
     uint16_t scan_code;
@@ -39,6 +41,79 @@ typedef uint64_t (*AstraFirmwareWaitForEvent)(
     void **events,
     uint64_t *index_out
 );
+
+
+/* UEFI Simple Pointer Protocol state. Protocol pointers are borrowed from firmware. */
+typedef struct AstraFirmwarePointerState {
+    int32_t relative_movement_x;
+    int32_t relative_movement_y;
+    int32_t relative_movement_z;
+    uint8_t left_button;
+    uint8_t right_button;
+} AstraFirmwarePointerState;
+
+typedef struct AstraFirmwareSimplePointerProtocol AstraFirmwareSimplePointerProtocol;
+
+typedef uint64_t (*AstraFirmwarePointerReset)(
+    AstraFirmwareSimplePointerProtocol *protocol,
+    uint8_t extended_verification
+);
+typedef uint64_t (*AstraFirmwarePointerGetState)(
+    AstraFirmwareSimplePointerProtocol *protocol,
+    AstraFirmwarePointerState *state_out
+);
+
+struct AstraFirmwareSimplePointerProtocol {
+    AstraFirmwarePointerReset reset;
+    AstraFirmwarePointerGetState get_state;
+    void *wait_for_input;
+    void *mode;
+};
+
+
+enum {
+    ASTRA_ABSOLUTE_POINTER_BUTTON_TOUCH_ACTIVE = 1u << 0,
+    ASTRA_ABSOLUTE_POINTER_BUTTON_ALT_ACTIVE = 1u << 1
+};
+
+/* UEFI Absolute Pointer Protocol state and mode, borrowed from firmware. */
+typedef struct AstraFirmwareAbsolutePointerState {
+    uint64_t current_x;
+    uint64_t current_y;
+    uint64_t current_z;
+    uint32_t active_buttons;
+} AstraFirmwareAbsolutePointerState;
+
+typedef struct AstraFirmwareAbsolutePointerMode {
+    uint64_t absolute_min_x;
+    uint64_t absolute_min_y;
+    uint64_t absolute_min_z;
+    uint64_t absolute_max_x;
+    uint64_t absolute_max_y;
+    uint64_t absolute_max_z;
+    uint64_t attributes;
+} AstraFirmwareAbsolutePointerMode;
+
+typedef struct AstraFirmwareAbsolutePointerProtocol AstraFirmwareAbsolutePointerProtocol;
+
+typedef uint64_t (*AstraFirmwareAbsolutePointerReset)(
+    AstraFirmwareAbsolutePointerProtocol *protocol,
+    uint8_t extended_verification
+);
+typedef uint64_t (*AstraFirmwareAbsolutePointerGetState)(
+    AstraFirmwareAbsolutePointerProtocol *protocol,
+    AstraFirmwareAbsolutePointerState *state_out
+);
+
+struct AstraFirmwareAbsolutePointerProtocol {
+    AstraFirmwareAbsolutePointerReset reset;
+    AstraFirmwareAbsolutePointerGetState get_state;
+    void *wait_for_input;
+    AstraFirmwareAbsolutePointerMode *mode;
+};
+
+/* UEFI Stall service, borrowed while Boot Services are kept active. */
+typedef uint64_t (*AstraFirmwareStall)(uint64_t microseconds);
 
 typedef struct AstraBootInfo {
     uint64_t magic;
@@ -71,6 +146,9 @@ typedef struct AstraBootInfo {
     uint64_t firmware_exception_level;
     uint64_t firmware_exception_vector;
     uint64_t firmware_daif;
+    AstraFirmwareSimplePointerProtocol *firmware_pointer_protocol;
+    AstraFirmwareAbsolutePointerProtocol *firmware_absolute_pointer_protocol;
+    AstraFirmwareStall firmware_stall;
 } AstraBootInfo;
 
 /* Called by the AArch64 entry assembly after the stack is installed. */
