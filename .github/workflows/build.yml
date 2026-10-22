@@ -34,22 +34,22 @@ jobs:
           file build/kernel.elf
           file build/kernel.bin
           file build/EFI/BOOT/BOOTAA64.EFI
-          xorriso -indev build/astraos-qemu-virt.iso -report_el_torito as_mkisofs
+          xorriso -indev build/astraos-aarch64-virt.iso -report_el_torito as_mkisofs
           test -s build/astraos-aarch64.iso
           test -s build/astraos-aarch64-esp.img
-          test -s build/astraos-qemu-virt.iso
-          test -s build/astraos-qemu-virt-esp.img
-          test -s build/astraos-qemu-keyboard.iso
-          test -s build/astraos-qemu-keyboard-esp.img
-          test -s build/astraos-qemu-desktop.iso
-          test -s build/astraos-qemu-desktop-esp.img
+          test -s build/astraos-aarch64-virt.iso
+          test -s build/astraos-aarch64-virt-esp.img
+          test -s build/astraos-aarch64-keyboard.iso
+          test -s build/astraos-aarch64-keyboard-esp.img
+          test -s build/astraos-aarch64-desktop.iso
+          test -s build/astraos-aarch64-desktop-esp.img
           (cd build && sha256sum -c SHA256SUMS)
-          mdir -i build/astraos-qemu-virt-esp.img ::/EFI/BOOT
-          mdir -i build/astraos-qemu-virt-esp.img ::/
+          mdir -i build/astraos-aarch64-virt-esp.img ::/EFI/BOOT
+          mdir -i build/astraos-aarch64-virt-esp.img ::/
           mdir -i build/astraos-aarch64-esp.img ::/keyboard-console.cfg
-          mdir -i build/astraos-qemu-keyboard-esp.img ::/keyboard-console.cfg
-          mdir -i build/astraos-qemu-desktop-esp.img ::/keyboard-console.cfg
-          mdir -i build/astraos-qemu-desktop-esp.img ::/desktop-mode.cfg
+          mdir -i build/astraos-aarch64-keyboard-esp.img ::/keyboard-console.cfg
+          mdir -i build/astraos-aarch64-desktop-esp.img ::/keyboard-console.cfg
+          mdir -i build/astraos-aarch64-desktop-esp.img ::/desktop-mode.cfg
 
       - name: Smoke-test kernel boot through UEFI in QEMU
         shell: bash
@@ -69,7 +69,7 @@ jobs:
             -device ramfb \
             -drive if=pflash,unit=0,format=raw,readonly=on,file="$CODE" \
             -drive if=pflash,unit=1,format=raw,file=build/uefi-vars.fd \
-            -cdrom build/astraos-qemu-virt.iso -boot order=d \
+            -cdrom build/astraos-aarch64-virt.iso -boot order=d \
             -display none -serial file:build/qemu-serial.log -monitor none \
             > build/qemu-launch.log 2>&1
           QEMU_STATUS=$?
@@ -112,7 +112,7 @@ jobs:
             -device ramfb -device qemu-xhci -device usb-kbd \
             -drive if=pflash,unit=0,format=raw,readonly=on,file="$CODE" \
             -drive if=pflash,unit=1,format=raw,file=build/uefi-keyboard-vars.fd \
-            -cdrom build/astraos-qemu-keyboard.iso -boot order=d \
+            -cdrom build/astraos-aarch64-keyboard.iso -boot order=d \
             -display none -serial file:build/qemu-keyboard-serial.log -monitor none \
             -qmp unix:build/qmp-keyboard.sock,server=on,wait=off \
             > build/qemu-keyboard-launch.log 2>&1 &
@@ -145,7 +145,7 @@ jobs:
             -device ramfb -device qemu-xhci -device usb-kbd \
             -drive if=pflash,unit=0,format=raw,readonly=on,file="$CODE" \
             -drive if=pflash,unit=1,format=raw,file=build/uefi-desktop-vars.fd \
-            -cdrom build/astraos-qemu-desktop.iso -boot order=d \
+            -cdrom build/astraos-aarch64-desktop.iso -boot order=d \
             -display none -serial file:build/qemu-desktop-serial.log -monitor none \
             -qmp unix:build/qmp-desktop.sock,server=on,wait=off \
             > build/qemu-desktop-launch.log 2>&1 &
@@ -168,12 +168,12 @@ jobs:
           path: |
             build/astraos-aarch64.iso
             build/astraos-aarch64-esp.img
-            build/astraos-qemu-virt.iso
-            build/astraos-qemu-virt-esp.img
-            build/astraos-qemu-keyboard.iso
-            build/astraos-qemu-keyboard-esp.img
-            build/astraos-qemu-desktop.iso
-            build/astraos-qemu-desktop-esp.img
+            build/astraos-aarch64-virt.iso
+            build/astraos-aarch64-virt-esp.img
+            build/astraos-aarch64-keyboard.iso
+            build/astraos-aarch64-keyboard-esp.img
+            build/astraos-aarch64-desktop.iso
+            build/astraos-aarch64-desktop-esp.img
             build/kernel.elf
             build/kernel.bin
             build/SHA256SUMS
@@ -206,9 +206,9 @@ jobs:
           fi
           gh release create rolling \
             build/astraos-aarch64.iso build/astraos-aarch64-esp.img \
-            build/astraos-qemu-virt.iso build/astraos-qemu-virt-esp.img \
-            build/astraos-qemu-keyboard.iso build/astraos-qemu-keyboard-esp.img \
-            build/astraos-qemu-desktop.iso build/astraos-qemu-desktop-esp.img \
+            build/astraos-aarch64-virt.iso build/astraos-aarch64-virt-esp.img \
+            build/astraos-aarch64-keyboard.iso build/astraos-aarch64-keyboard-esp.img \
+            build/astraos-aarch64-desktop.iso build/astraos-aarch64-desktop-esp.img \
             build/kernel.elf build/kernel.bin build/SHA256SUMS \
             --repo "$GITHUB_REPOSITORY" \
             --target "$TARGET_SHA" \
@@ -225,9 +225,9 @@ jobs:
           TARGET_SHA="$(git rev-parse HEAD)"
           gh release create "$VERSION" \
             build/astraos-aarch64.iso build/astraos-aarch64-esp.img \
-            build/astraos-qemu-virt.iso build/astraos-qemu-virt-esp.img \
-            build/astraos-qemu-keyboard.iso build/astraos-qemu-keyboard-esp.img \
-            build/astraos-qemu-desktop.iso build/astraos-qemu-desktop-esp.img \
+            build/astraos-aarch64-virt.iso build/astraos-aarch64-virt-esp.img \
+            build/astraos-aarch64-keyboard.iso build/astraos-aarch64-keyboard-esp.img \
+            build/astraos-aarch64-desktop.iso build/astraos-aarch64-desktop-esp.img \
             build/kernel.elf build/kernel.bin build/SHA256SUMS \
             --repo "$GITHUB_REPOSITORY" \
             --target "$TARGET_SHA" \
