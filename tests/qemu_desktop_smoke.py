@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import socket
+import struct
 import sys
 import time
 from pathlib import Path
@@ -83,6 +84,66 @@ class QMPClient:
         self.execute("human-monitor-command", {"command-line": f"sendkey {key}"})
 
 
+class VNCClient:
+    """Minimal RFB 3.8 client that forwards pointer events through QEMU's VNC frontend."""
+
+    def __init__(self, host: str, port: int) -> None:
+        self._socket = socket.create_connection((host, port), timeout=CONNECT_TIMEOUT)
+        self._socket.settimeout(COMMAND_TIMEOUT)
+        try:
+            version = self._read_exact(12)
+            if not version.startswith(b"RFB 003."):
+                raise RuntimeError(f"unexpected VNC protocol banner: {version!r}")
+            self._socket.sendall(version)
+
+            security_count = self._read_exact(1)[0]
+            if security_count == 0:
+                reason_length = struct.unpack(">I", self._read_exact(4))[0]
+                reason = self._read_exact(reason_length).decode("utf-8", errors="replace")
+                raise RuntimeError(f"VNC server refused connection: {reason}")
+            security_types = self._read_exact(security_count)
+            if 1 not in security_types:
+                raise RuntimeError(
+                    f"VNC server has no unauthenticated security type: {security_types!r}"
+                )
+            self._socket.sendall(b"\x01")
+            security_result = struct.unpack(">I", self._read_exact(4))[0]
+            if security_result != 0:
+                raise RuntimeError(f"VNC security handshake failed: {security_result}")
+
+            self._socket.sendall(b"\x01")
+            server_init = self._read_exact(24)
+            self.width, self.height = struct.unpack(">HH", server_init[:4])
+            name_length = struct.unpack(">I", server_init[20:24])[0]
+            self.server_name = self._read_exact(name_length).decode("utf-8", errors="replace")
+            if self.width < 480 or self.height < 360:
+                raise RuntimeError(f"VNC framebuffer is too small: {self.width}x{self.height}")
+        except Exception:
+            self._socket.close()
+            raise
+
+    def _read_exact(self, length: int) -> bytes:
+        if length < 0 or length > 65536:
+            raise ValueError(f"invalid VNC read length: {length}")
+        result = bytearray()
+        while len(result) < length:
+            chunk = self._socket.recv(length - len(result))
+            if not chunk:
+                raise RuntimeError("VNC connection closed during handshake")
+            result.extend(chunk)
+        return bytes(result)
+
+    def pointer(self, x: int, y: int, buttons: int = 0) -> None:
+        clamped_x = max(0, min(self.width - 1, x))
+        clamped_y = max(0, min(self.height - 1, y))
+        self._socket.sendall(
+            struct.pack(">BBHH", 5, buttons & 0x07, clamped_x, clamped_y)
+        )
+
+    def close(self) -> None:
+        self._socket.close()
+
+
 def read_log(path: Path) -> str:
     try:
         return path.read_text(encoding="utf-8", errors="replace")
@@ -120,32 +181,15 @@ def type_command(client: QMPClient, command: str) -> None:
 
 
 
-def send_mouse_move(client: QMPClient, dx: int, dy: int) -> None:
-    events: list[dict[str, Any]] = []
-    if dx != 0:
-        events.append({"type": "rel", "data": {"axis": "x", "value": dx}})
-    if dy != 0:
-        events.append({"type": "rel", "data": {"axis": "y", "value": dy}})
-    if events:
-        client.execute("input-send-event", {"events": events})
-        time.sleep(0.2)
-
-
-def click_mouse(client: QMPClient) -> None:
-    client.execute(
-        "input-send-event",
-        {"events": [{"type": "btn", "data": {"down": True, "button": "left"}}]},
-    )
-    time.sleep(0.18)
-    client.execute(
-        "input-send-event",
-        {"events": [{"type": "btn", "data": {"down": False, "button": "left"}}]},
-    )
-    time.sleep(0.18)
+def click_mouse(client: VNCClient, x: int, y: int) -> None:
+    client.pointer(x, y, buttons=1)
+    time.sleep(0.2)
+    client.pointer(x, y, buttons=0)
+    time.sleep(0.2)
 
 
 def move_mouse_to(
-    client: QMPClient,
+    client: VNCClient,
     current_x: int,
     current_y: int,
     target_x: int,
@@ -153,12 +197,10 @@ def move_mouse_to(
     screen_width: int,
     screen_height: int,
 ) -> tuple[int, int]:
-    dx = int(round((target_x - current_x) / POINTER_SCALE))
-    dy = int(round((target_y - current_y) / POINTER_SCALE))
-    send_mouse_move(client, dx, dy)
-    current_x = max(0, min(screen_width - 1, current_x + dx * POINTER_SCALE))
-    current_y = max(0, min(screen_height - 1, current_y + dy * POINTER_SCALE))
-    return current_x, current_y
+    del current_x, current_y, screen_width, screen_height
+    client.pointer(target_x, target_y, buttons=0)
+    time.sleep(0.2)
+    return target_x, target_y
 
 
 def capture_and_verify_desktop(client: QMPClient, screenshot_path: Path) -> tuple[int, int]:
@@ -269,18 +311,24 @@ def main(argv: list[str]) -> int:
         wait_for_log(log_path, "ASTRAOS_DISPLAY_SERVER_READY", BOOT_TIMEOUT)
         wait_for_log(log_path, "ASTRAOS_POINTER_INPUT_READY", EVENT_TIMEOUT)
         screen_width, screen_height = capture_and_verify_desktop(client, screenshot_path)
+        vnc = VNCClient("127.0.0.1", 5905)
+        if (vnc.width, vnc.height) != (screen_width, screen_height):
+            raise RuntimeError(
+                f"VNC/GOP dimensions differ: {vnc.width}x{vnc.height} vs "
+                f"{screen_width}x{screen_height}"
+            )
         mouse_x = screen_width // 2
         mouse_y = screen_height // 2
 
         mouse_x, mouse_y = move_mouse_to(
-            client, mouse_x, mouse_y, 80, 20, screen_width, screen_height
+            vnc, mouse_x, mouse_y, 80, 20, screen_width, screen_height
         )
-        click_mouse(client)
+        click_mouse(vnc, mouse_x, mouse_y)
         wait_for_log(log_path, "desktop: applications menu opened by pointer", EVENT_TIMEOUT)
         mouse_x, mouse_y = move_mouse_to(
-            client, mouse_x, mouse_y, 80, 95, screen_width, screen_height
+            vnc, mouse_x, mouse_y, 80, 95, screen_width, screen_height
         )
-        click_mouse(client)
+        click_mouse(vnc, mouse_x, mouse_y)
         wait_for_log(log_path, "desktop: terminal window opened by pointer", EVENT_TIMEOUT)
 
         type_command(client, "help")
@@ -291,14 +339,14 @@ def main(argv: list[str]) -> int:
         wait_for_log(log_path, "desktop: terminal command ls", EVENT_TIMEOUT)
 
         mouse_x, mouse_y = move_mouse_to(
-            client, mouse_x, mouse_y, 80, 20, screen_width, screen_height
+            vnc, mouse_x, mouse_y, 80, 20, screen_width, screen_height
         )
-        click_mouse(client)
+        click_mouse(vnc, mouse_x, mouse_y)
         wait_for_log(log_path, "desktop: applications menu opened by pointer", EVENT_TIMEOUT)
         mouse_x, mouse_y = move_mouse_to(
-            client, mouse_x, mouse_y, 80, 119, screen_width, screen_height
+            vnc, mouse_x, mouse_y, 80, 119, screen_width, screen_height
         )
-        click_mouse(client)
+        click_mouse(vnc, mouse_x, mouse_y)
         wait_for_log(log_path, "desktop: file browser opened by pointer", EVENT_TIMEOUT)
 
         file_window_width = min(720, screen_width - 40)
@@ -310,27 +358,28 @@ def main(argv: list[str]) -> int:
         file_x = min(file_x, screen_width - file_window_width - 8)
         file_y = min(file_y, screen_height - 54 - file_window_height - 8)
         mouse_x, mouse_y = move_mouse_to(
-            client, mouse_x, mouse_y, file_x + 220, file_y + 76,
+            vnc, mouse_x, mouse_y, file_x + 220, file_y + 76,
             screen_width, screen_height
         )
-        click_mouse(client)
+        click_mouse(vnc, mouse_x, mouse_y)
         wait_for_log(log_path, "desktop: file selected by pointer", EVENT_TIMEOUT)
-        click_mouse(client)
+        click_mouse(vnc, mouse_x, mouse_y)
         wait_for_log(log_path, "desktop: files directory opened", EVENT_TIMEOUT)
 
-        click_mouse(client)
+        click_mouse(vnc, mouse_x, mouse_y)
         wait_for_log(log_path, "desktop: text viewer opened", EVENT_TIMEOUT)
 
         mouse_x, mouse_y = move_mouse_to(
-            client, mouse_x, mouse_y, 280, 20, screen_width, screen_height
+            vnc, mouse_x, mouse_y, 280, 20, screen_width, screen_height
         )
-        click_mouse(client)
+        click_mouse(vnc, mouse_x, mouse_y)
         wait_for_log(log_path, "desktop: task button focused by pointer", EVENT_TIMEOUT)
         type_command(client, "whoami")
         type_command(client, "exit")
         wait_for_log(log_path, "desktop: terminal window closed", EVENT_TIMEOUT)
         client.send_key("q")
         wait_for_log(log_path, "desktop: returned to shell", EVENT_TIMEOUT)
+        vnc.close()
         print("AstraOS desktop test passed: visible framebuffer, mouse, applications menu, taskbar, terminal and file manager.")
         return 0
     except (OSError, RuntimeError, TimeoutError, ValueError, json.JSONDecodeError) as error:
