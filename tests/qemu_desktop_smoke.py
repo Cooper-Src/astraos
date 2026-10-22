@@ -267,7 +267,8 @@ def main(argv: list[str]) -> int:
 
         pointer = QMPPointer(client, screen_width, screen_height)
         try:
-            print(f"QEMU pointer devices: {client.execute(\"query-mice\")}")
+            mice = client.execute("query-mice")
+            print(f"QEMU pointer devices: {mice}")
         except RuntimeError as error:
             print(f"QEMU query-mice diagnostic unavailable: {error}")
         print(f"QMP pointer input ready: {pointer.width}x{pointer.height}.")
