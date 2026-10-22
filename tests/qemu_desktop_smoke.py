@@ -294,9 +294,10 @@ def assert_desktop_is_visible(
     width, height, colors = screenshot
     required_colors = {
         "panel": ((0x11, 0x1B, 0x2B), 100),
-        "window frame": ((0x43, 0x55, 0x70), 100),
+        "active window title bar": ((0x2C, 0x52, 0x6A), 100),
+        "window body": ((0x1A, 0x26, 0x38), 1000),
         "wallpaper accent": ((0x20, 0x36, 0x51), 100),
-        "text": ((0xEA, 0xF1, 0xFA), 30),
+        "visible text": ((0xEA, 0xF1, 0xFA), 30),
     }
     missing = [
         name for name, (rgb, minimum_count) in required_colors.items()
@@ -305,6 +306,27 @@ def assert_desktop_is_visible(
     if missing:
         raise RuntimeError(
             "desktop rendered without expected UI pixels: "
+            + ", ".join(missing)
+            + f"; screenshot={width}x{height}, distinct_colors={len(colors)}"
+        )
+
+
+def assert_terminal_is_visible(
+    screenshot: tuple[int, int, Counter[tuple[int, int, int]]]
+) -> None:
+    width, height, colors = screenshot
+    required_colors = {
+        "terminal surface": ((0x0A, 0x11, 0x1B), 1000),
+        "terminal text": ((0xC3, 0xF5, 0xD5), 30),
+        "active title bar": ((0x2C, 0x52, 0x6A), 100),
+    }
+    missing = [
+        name for name, (rgb, minimum_count) in required_colors.items()
+        if colors[rgb] < minimum_count
+    ]
+    if missing:
+        raise RuntimeError(
+            "Terminal window is not visibly rendered: "
             + ", ".join(missing)
             + f"; screenshot={width}x{height}, distinct_colors={len(colors)}"
         )
@@ -355,6 +377,7 @@ def main(argv: list[str]) -> int:
             raise RuntimeError("opening Applications did not change the captured desktop")
         mouse.click(65, 47 + 45, width, height)
         wait_for_log(log_path, "desktop: terminal window opened", EVENT_TIMEOUT)
+        assert_terminal_is_visible(client.screenshot(screenshot_path))
 
         type_command(client, "help")
         wait_for_log(log_path, "desktop: terminal command help", EVENT_TIMEOUT)
