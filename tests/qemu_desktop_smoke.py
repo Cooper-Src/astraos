@@ -240,7 +240,7 @@ def main(argv: list[str]) -> int:
         time.sleep(0.15)
         client.click()
         wait_for_log(log_path, "desktop: applications menu opened by pointer", EVENT_TIMEOUT)
-        client.send_pointer_motion(-5, 35)
+        client.send_pointer_motion(-5, 40)
         time.sleep(0.15)
         client.click()
         wait_for_log(log_path, "desktop: terminal window opened by pointer", EVENT_TIMEOUT)
