@@ -30,6 +30,7 @@ static void *g_firmware_poll_event = NULL;
 static uint64_t g_firmware_exception_level = 0u;
 static uint64_t g_firmware_exception_vector = 0u;
 static uint64_t g_firmware_daif = 0u;
+static bool g_logged_pointer_state = false;
 
 #if defined(__aarch64__)
 /* Firmware services need their original vector table and an unmasked IRQ path. */
@@ -232,6 +233,7 @@ bool astra_input_initialize(const AstraBootInfo *boot_info, bool serial_ready) {
     g_firmware_exception_level = 0u;
     g_firmware_exception_vector = 0u;
     g_firmware_daif = 0u;
+    g_logged_pointer_state = false;
 
     if (boot_info != NULL &&
         boot_info->magic == ASTRA_BOOT_INFO_MAGIC &&
@@ -318,8 +320,6 @@ bool astra_input_read_event(AstraInputEvent *event_out) {
 
     for (;;) {
         AstraFirmwareInputKey key;
-        AstraFirmwareSimplePointerState simple_state;
-        AstraFirmwareAbsolutePointerState absolute_state;
         uint64_t status = ASTRA_INPUT_EFI_UNSUPPORTED;
 
         key.scan_code = 0u;
@@ -338,12 +338,48 @@ bool astra_input_read_event(AstraInputEvent *event_out) {
         }
 
         /*
-         * Poll all available pointer protocols after every firmware event.
-         * Some firmware implementations don't signal WaitForInput consistently;
-         * the loader's periodic timer provides a bounded polling opportunity.
+         * Prefer Simple Pointer before Absolute Pointer. A UEFI implementation
+         * may publish both protocols for one USB tablet, but only Simple Pointer
+         * reliably reports mouse buttons. Checking Absolute Pointer first can
+         * consume each update and starve the button-capable protocol.
          */
+        if (g_simple_pointer != NULL) {
+            AstraFirmwareSimplePointerState simple_state;
+            simple_state.relative_x = 0;
+            simple_state.relative_y = 0;
+            simple_state.relative_z = 0;
+            simple_state.left_button = 0u;
+            simple_state.right_button = 0u;
+            status = firmware_read_simple_pointer(&simple_state);
+            if (status == ASTRA_INPUT_EFI_SUCCESS) {
+                event_out->kind = ASTRA_INPUT_EVENT_POINTER;
+                event_out->delta_x = simple_state.relative_x;
+                event_out->delta_y = simple_state.relative_y;
+                event_out->left_button_down = simple_state.left_button != 0u;
+                event_out->right_button_down = simple_state.right_button != 0u;
+                if (!g_logged_pointer_state) {
+                    g_logged_pointer_state = true;
+                    astra_uart_puts("desktop: UEFI Simple Pointer event received dx=");
+                    astra_uart_put_u32((uint32_t)simple_state.relative_x);
+                    astra_uart_puts(" dy=");
+                    astra_uart_put_u32((uint32_t)simple_state.relative_y);
+                    astra_uart_puts(" left=");
+                    astra_uart_put_u32(event_out->left_button_down ? 1u : 0u);
+                    astra_uart_puts("\n");
+                }
+                return true;
+            }
+            if (status != ASTRA_INPUT_EFI_NOT_READY &&
+                status != ASTRA_INPUT_EFI_UNSUPPORTED) {
+                g_simple_pointer = NULL;
+                astra_uart_puts("desktop: Simple Pointer disabled after device error\n");
+            }
+        }
+
         if (g_absolute_pointer != NULL) {
-            const AstraFirmwareAbsolutePointerMode *mode = g_absolute_pointer->mode;
+            AstraFirmwareAbsolutePointerState absolute_state;
+            const AstraFirmwareAbsolutePointerMode *mode =
+                g_absolute_pointer->mode;
             absolute_state.current_x = 0u;
             absolute_state.current_y = 0u;
             absolute_state.current_z = 0u;
@@ -362,32 +398,22 @@ bool astra_input_read_event(AstraInputEvent *event_out) {
                     (absolute_state.active_buttons & UINT32_C(1)) != 0u;
                 event_out->right_button_down =
                     (absolute_state.active_buttons & UINT32_C(2)) != 0u;
+                if (!g_logged_pointer_state) {
+                    g_logged_pointer_state = true;
+                    astra_uart_puts("desktop: UEFI Absolute Pointer event received x=");
+                    astra_uart_put_u32((uint32_t)absolute_state.current_x);
+                    astra_uart_puts(" y=");
+                    astra_uart_put_u32((uint32_t)absolute_state.current_y);
+                    astra_uart_puts(" left=");
+                    astra_uart_put_u32(event_out->left_button_down ? 1u : 0u);
+                    astra_uart_puts("\n");
+                }
                 return true;
             }
             if (status != ASTRA_INPUT_EFI_NOT_READY &&
                 status != ASTRA_INPUT_EFI_UNSUPPORTED) {
                 g_absolute_pointer = NULL;
-            }
-        }
-
-        if (g_simple_pointer != NULL) {
-            simple_state.relative_x = 0;
-            simple_state.relative_y = 0;
-            simple_state.relative_z = 0;
-            simple_state.left_button = 0u;
-            simple_state.right_button = 0u;
-            status = firmware_read_simple_pointer(&simple_state);
-            if (status == ASTRA_INPUT_EFI_SUCCESS) {
-                event_out->kind = ASTRA_INPUT_EVENT_POINTER;
-                event_out->delta_x = simple_state.relative_x;
-                event_out->delta_y = simple_state.relative_y;
-                event_out->left_button_down = simple_state.left_button != 0u;
-                event_out->right_button_down = simple_state.right_button != 0u;
-                return true;
-            }
-            if (status != ASTRA_INPUT_EFI_NOT_READY &&
-                status != ASTRA_INPUT_EFI_UNSUPPORTED) {
-                g_simple_pointer = NULL;
+                astra_uart_puts("desktop: Absolute Pointer disabled after device error\n");
             }
         }
 
@@ -416,9 +442,9 @@ bool astra_input_read_event(AstraInputEvent *event_out) {
                 return false;
             }
             /*
-             * Deliberately don't branch on event_index: a pointer may already
-             * have state pending when a key/timer wakes the wait, so poll all
-             * devices at the top of the next iteration.
+             * Do not infer the changed device from the wait result. Firmware may
+             * signal the timer or keyboard while pointer state is also pending.
+             * Poll all devices again at the top of the loop.
              */
         }
     }
