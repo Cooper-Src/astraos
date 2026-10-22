@@ -89,8 +89,8 @@ class QMPClient:
             raise ValueError("framebuffer dimensions are too small for pointer injection")
         x = max(0, min(x, width - 1))
         y = max(0, min(y, height - 1))
-        absolute_x = x * 0x7FFF // (width - 1)
-        absolute_y = y * 0x7FFF // (height - 1)
+        absolute_x = x * 0x7FFFF // (width - 1)
+        absolute_y = y * 0x7FFFF // (height - 1)
         self.execute(
             "input-send-event",
             {
