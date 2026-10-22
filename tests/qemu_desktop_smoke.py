@@ -111,7 +111,7 @@ class QMPPointer:
                     "type": "btn",
                     "data": {"button": name, "down": after},
                 })
-        self._client.execute("input-send-event", {"device": "desktop-display", "head": 0, "events": events})
+        self._client.execute("input-send-event", {"events": events})
         self._buttons = buttons
 
 def read_log(path: Path) -> str:
@@ -266,6 +266,10 @@ def main(argv: list[str]) -> int:
         screen_width, screen_height = save_and_check_screenshot(client, screenshot_path)
 
         pointer = QMPPointer(client, screen_width, screen_height)
+        try:
+            print(f"QEMU pointer devices: {client.execute(\"query-mice\")}")
+        except RuntimeError as error:
+            print(f"QEMU query-mice diagnostic unavailable: {error}")
         print(f"QMP pointer input ready: {pointer.width}x{pointer.height}.")
         client.send_key("t")
         wait_for_log(log_path, "desktop: terminal window opened", EVENT_TIMEOUT)
