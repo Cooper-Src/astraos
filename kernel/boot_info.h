@@ -4,7 +4,7 @@
 #include <stdint.h>
 
 #define ASTRA_BOOT_INFO_MAGIC UINT64_C(0x4153545241424f4f)
-#define ASTRA_BOOT_INFO_VERSION UINT64_C(7)
+#define ASTRA_BOOT_INFO_VERSION UINT64_C(8)
 #define ASTRA_BOOT_MEMORY_MAP_CAP_BYTES (UINT64_C(16384) * UINT64_C(8))
 
 #define ASTRA_BOOT_FLAG_BOOT_SERVICES_ACTIVE (UINT64_C(1) << 0u)
@@ -110,6 +110,8 @@ struct AstraFirmwareAbsolutePointerProtocol {
 /* UEFI Stall is borrowed while Boot Services remain active. */
 typedef uint64_t (*AstraFirmwareStall)(uint64_t microseconds);
 
+/* Periodic firmware timer event, borrowed while UEFI Boot Services stay active. */
+
 /* UEFI WaitForEvent ABI; valid only while the boot services are active. */
 typedef uint64_t (*AstraFirmwareWaitForEvent)(
     uint64_t event_count,
@@ -148,6 +150,7 @@ typedef struct AstraBootInfo {
     AstraFirmwareAbsolutePointerProtocol *firmware_absolute_pointer_protocol;
     AstraFirmwareWaitForEvent firmware_wait_for_event;
     AstraFirmwareStall firmware_stall;
+    void *firmware_poll_event;
     uint64_t firmware_exception_level;
     uint64_t firmware_exception_vector;
     uint64_t firmware_daif;
