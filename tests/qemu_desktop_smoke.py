@@ -27,6 +27,8 @@ class QMPClient:
         self._next_id = 1
         self._pointer_x: int | None = None
         self._pointer_y: int | None = None
+        self._hmp_pointer_x: int | None = None
+        self._hmp_pointer_y: int | None = None
         try:
             self._socket.settimeout(CONNECT_TIMEOUT)
             self._socket.connect(socket_path)
@@ -131,22 +133,26 @@ class QMPClient:
             raise ValueError("framebuffer dimensions are too small for pointer input")
         x = max(0, min(x, width - 1))
         y = max(0, min(y, height - 1))
-        if self._pointer_x is None or self._pointer_y is None:
-            self._pointer_x = width // 2
-            self._pointer_y = height // 2
-        delta_x = int((x - self._pointer_x) / 2)
-        delta_y = int((y - self._pointer_y) / 2)
+        if self._hmp_pointer_x is None or self._hmp_pointer_y is None:
+            self._hmp_pointer_x = width // 2
+            self._hmp_pointer_y = height // 2
+        delta_x = int((x - self._hmp_pointer_x) / 2)
+        delta_y = int((y - self._hmp_pointer_y) / 2)
+        self.execute(
+            "human-monitor-command",
+            {"command-line": "mouse_set 0"},
+        )
         if delta_x != 0 or delta_y != 0:
-            self.execute(
-                "human-monitor-command",
-                {"command-line": "mouse_set 0"},
-            )
             self.execute(
                 "human-monitor-command",
                 {"command-line": f"mouse_move {delta_x} {delta_y}"},
             )
-            self._pointer_x = max(0, min(width - 1, self._pointer_x + delta_x * 2))
-            self._pointer_y = max(0, min(height - 1, self._pointer_y + delta_y * 2))
+            self._hmp_pointer_x = max(
+                0, min(width - 1, self._hmp_pointer_x + delta_x * 2)
+            )
+            self._hmp_pointer_y = max(
+                0, min(height - 1, self._hmp_pointer_y + delta_y * 2)
+            )
         time.sleep(0.2)
         self.execute(
             "human-monitor-command",
@@ -163,6 +169,16 @@ class QMPClient:
         self.execute("human-monitor-command", {"command-line": f"screendump {path}"})
         return read_ppm(path)
 
+
+
+class HMPPointer:
+    """Pointer adapter that sends all clicks through QEMU's selected mouse."""
+
+    def __init__(self, client: QMPClient) -> None:
+        self._client = client
+
+    def click(self, x: int, y: int, width: int, height: int) -> None:
+        self._client.hmp_click(x, y, width, height)
 
 
 class VNCClient:
@@ -445,6 +461,7 @@ def main(argv: list[str]) -> int:
             try:
                 wait_for_log(log_path, "desktop: pointer report", EVENT_TIMEOUT)
                 wait_for_log(log_path, "desktop: applications menu opened", EVENT_TIMEOUT)
+                pointer = HMPPointer(client)
                 print("Desktop pointer test used the QEMU active-mouse monitor API.")
             except TimeoutError:
                 mouse = VNCClient()
