@@ -155,7 +155,7 @@ jobs:
             wait "$QEMU_PID" 2>/dev/null || true
           }
           trap cleanup EXIT
-          python3 tests/qemu_desktop_smoke.py build/qmp-desktop.sock build/qemu-desktop-serial.log build/desktop-screen.ppm 5901
+          python3 tests/qemu_desktop_smoke.py build/qmp-desktop.sock build/qemu-desktop-serial.log build/desktop-screen.ppm
           cleanup
           trap - EXIT
           cat build/qemu-desktop-launch.log
