@@ -32,8 +32,13 @@ enum {
     EFI_ALLOCATE_ANY_PAGES = 0,
     EFI_LOADER_CODE = 1,
     EFI_LOADER_DATA = 2,
-    EFI_FILE_MODE_READ = 1
+    EFI_FILE_MODE_READ = 1,
+    EFI_TPL_CALLBACK = 8u,
+    EFI_TIMER_PERIODIC = 1u,
+    EFI_POINTER_POLL_INTERVAL_100NS = 100000u
 };
+
+#define EFI_EVT_TIMER UINT32_C(0x80000000)
 
 enum {
     KERNEL_STAGING_CAP = 1024u * 1024u,
@@ -96,6 +101,14 @@ typedef EFI_STATUS (EFIAPI *EFI_GET_MEMORY_MAP)(
 );
 typedef EFI_STATUS (EFIAPI *EFI_EXIT_BOOT_SERVICES)(EFI_HANDLE, EFI_UINTN);
 typedef EFI_STATUS (EFIAPI *EFI_LOCATE_PROTOCOL)(EFI_GUID *, void *, void **);
+typedef EFI_STATUS (EFIAPI *EFI_CREATE_EVENT)(
+    EFI_UINT32,
+    EFI_UINTN,
+    void *,
+    void *,
+    void **
+);
+typedef EFI_STATUS (EFIAPI *EFI_SET_TIMER)(void *, EFI_UINT32, EFI_UINT64);
 
 struct EFI_BOOT_SERVICES {
     EFI_TABLE_HEADER Hdr;
@@ -106,11 +119,11 @@ struct EFI_BOOT_SERVICES {
     EFI_GET_MEMORY_MAP GetMemoryMap;
     void *AllocatePool;
     void *FreePool;
-    void *CreateEvent;
-    void *SetTimer;
+    EFI_CREATE_EVENT CreateEvent;
+    EFI_SET_TIMER SetTimer;
     AstraFirmwareWaitForEvent WaitForEvent;
     void *SignalEvent;
-    void *CloseEvent;
+    EFI_STATUS (EFIAPI *CloseEvent)(void *);
     void *CheckEvent;
     void *InstallProtocolInterface;
     void *ReinstallProtocolInterface;
@@ -237,6 +250,14 @@ static EFI_GUID g_simple_file_system_guid = {
 static EFI_GUID g_graphics_output_guid = {
     0x9042a9deu, 0x23dcu, 0x4a38u,
     {0x96u, 0xfbu, 0x7au, 0xdeu, 0xd0u, 0x80u, 0x51u, 0x6au}
+};
+static EFI_GUID g_simple_pointer_guid = {
+    0x31878c87u, 0x0b75u, 0x11d5u,
+    {0x9au, 0x4fu, 0x00u, 0x90u, 0x27u, 0x3fu, 0xc1u, 0x4du}
+};
+static EFI_GUID g_absolute_pointer_guid = {
+    0x8d59d32bu, 0xc655u, 0x4ae9u,
+    {0x9bu, 0x15u, 0xf2u, 0x59u, 0x04u, 0x99u, 0x2au, 0x43u}
 };
 static const EFI_GUID g_dtb_table_guid = {
     0xb1b621d5u, 0xf19cu, 0x41a5u,
@@ -556,6 +577,110 @@ static bool configure_firmware_keyboard_console(
         ASTRA_BOOT_FLAG_UEFI_TEXT_INPUT;
     boot_info->firmware_input_protocol = (AstraFirmwareTextInputProtocol *)input;
     boot_info->firmware_wait_for_event = system_table->BootServices->WaitForEvent;
+    boot_info->firmware_simple_pointer_protocol = NULL;
+    boot_info->firmware_absolute_pointer_protocol = NULL;
+    boot_info->firmware_pointer_poll_event = NULL;
+
+    if (system_table->BootServices->LocateProtocol != NULL) {
+        void *pointer_interface = NULL;
+        EFI_STATUS pointer_status = system_table->BootServices->LocateProtocol(
+            &g_simple_pointer_guid,
+            NULL,
+            &pointer_interface
+        );
+        if (pointer_status == EFI_SUCCESS && pointer_interface != NULL) {
+            AstraFirmwareSimplePointerProtocol *pointer =
+                (AstraFirmwareSimplePointerProtocol *)pointer_interface;
+            if (pointer->reset != NULL && pointer->get_state != NULL &&
+                pointer->wait_for_input != NULL) {
+                const EFI_STATUS reset_status = pointer->reset(pointer, 0u);
+                if (reset_status == EFI_SUCCESS) {
+                    boot_info->firmware_simple_pointer_protocol = pointer;
+                    boot_info->flags |= ASTRA_BOOT_FLAG_UEFI_SIMPLE_POINTER;
+                    loader_out(L"UEFI Simple Pointer protocol reset and ready.\\r\\n");
+                } else {
+                    loader_out(L"Warning: UEFI Simple Pointer reset failed.\\r\\n");
+                }
+            }
+        }
+
+        pointer_interface = NULL;
+        pointer_status = system_table->BootServices->LocateProtocol(
+            &g_absolute_pointer_guid,
+            NULL,
+            &pointer_interface
+        );
+        if (pointer_status == EFI_SUCCESS && pointer_interface != NULL) {
+            AstraFirmwareAbsolutePointerProtocol *pointer =
+                (AstraFirmwareAbsolutePointerProtocol *)pointer_interface;
+            const AstraFirmwareAbsolutePointerMode *mode = pointer->mode;
+            if (pointer->reset != NULL && pointer->get_state != NULL &&
+                pointer->wait_for_input != NULL && mode != NULL &&
+                mode->max_x > mode->min_x && mode->max_y > mode->min_y &&
+                mode->max_x - mode->min_x <= UINT32_MAX &&
+                mode->max_y - mode->min_y <= UINT32_MAX) {
+                const EFI_STATUS reset_status = pointer->reset(pointer, 0u);
+                if (reset_status == EFI_SUCCESS) {
+                    boot_info->firmware_absolute_pointer_protocol = pointer;
+                    boot_info->flags |= ASTRA_BOOT_FLAG_UEFI_ABSOLUTE_POINTER;
+                    loader_out(L"UEFI Absolute Pointer protocol reset and ready.\\r\\n");
+                } else {
+                    loader_out(L"Warning: UEFI Absolute Pointer reset failed.\\r\\n");
+                }
+            }
+        }
+    }
+    /*
+     * Some firmware advances its pointer protocol only during event dispatch.
+     * The periodic timer ensures state is polled even if WaitForInput is silent.
+     */
+    if (boot_info->firmware_simple_pointer_protocol != NULL ||
+        boot_info->firmware_absolute_pointer_protocol != NULL) {
+        EFI_STATUS timer_status = EFI_UNSUPPORTED;
+        void *poll_event = NULL;
+
+        if (system_table->BootServices->CreateEvent != NULL &&
+            system_table->BootServices->SetTimer != NULL &&
+            system_table->BootServices->CloseEvent != NULL) {
+            timer_status = system_table->BootServices->CreateEvent(
+                (EFI_UINT32)EFI_EVT_TIMER,
+                (EFI_UINTN)EFI_TPL_CALLBACK,
+                NULL,
+                NULL,
+                &poll_event
+            );
+            if (timer_status == EFI_SUCCESS && poll_event != NULL) {
+                timer_status = system_table->BootServices->SetTimer(
+                    poll_event,
+                    (EFI_UINT32)EFI_TIMER_PERIODIC,
+                    (EFI_UINT64)EFI_POINTER_POLL_INTERVAL_100NS
+                );
+                if (timer_status == EFI_SUCCESS) {
+                    boot_info->firmware_pointer_poll_event = poll_event;
+                    loader_out(L"UEFI pointer polling timer enabled.\\r\\n");
+                } else {
+                    const EFI_STATUS close_status =
+                        system_table->BootServices->CloseEvent(poll_event);
+                    if (close_status != EFI_SUCCESS) {
+                        loader_out(L"Warning: could not close the inactive pointer timer.\\r\\n");
+                    }
+                    loader_out(L"Warning: could not start UEFI pointer timer.\\r\\n");
+                }
+            } else {
+                if (poll_event != NULL) {
+                    const EFI_STATUS close_status =
+                        system_table->BootServices->CloseEvent(poll_event);
+                    if (close_status != EFI_SUCCESS) {
+                        loader_out(L"Warning: could not close the unused pointer timer.\\r\\n");
+                    }
+                }
+                loader_out(L"Warning: could not create UEFI pointer timer.\\r\\n");
+            }
+        } else {
+            loader_out(L"Warning: UEFI pointer timer services unavailable.\\r\\n");
+        }
+    }
+
     boot_info->firmware_exception_level = exception_level;
     boot_info->firmware_exception_vector = vector;
     /* UEFI input/timer events need IRQ delivery while firmware vectors are active. */
@@ -1107,6 +1232,9 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *system_table) {
     g_boot_info.flags = 0u;
     g_boot_info.firmware_input_protocol = NULL;
     g_boot_info.firmware_wait_for_event = NULL;
+    g_boot_info.firmware_simple_pointer_protocol = NULL;
+    g_boot_info.firmware_absolute_pointer_protocol = NULL;
+    g_boot_info.firmware_pointer_poll_event = NULL;
     g_boot_info.firmware_exception_level = 0u;
     g_boot_info.firmware_exception_vector = 0u;
     g_boot_info.firmware_daif = 0u;
