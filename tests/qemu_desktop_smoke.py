@@ -98,9 +98,22 @@ class QMPClient:
             self._pointer_y = height // 2
         delta_x = x - self._pointer_x
         delta_y = y - self._pointer_y
-        relative_x = int(delta_x / 2)
-        relative_y = int(delta_y / 2)
-        if relative_x != 0 or relative_y != 0:
+        # A boot-protocol USB mouse reports signed 8-bit motion per report. Keep
+        # injected reports small, like a real mouse, instead of sending one large
+        # impossible movement and relying on the emulated HID device to clamp it.
+        steps = max(
+            1,
+            (max(abs(delta_x), abs(delta_y)) + 39) // 40,
+        )
+        for step in range(steps):
+            next_x = int(delta_x * (step + 1) / steps)
+            prev_x = int(delta_x * step / steps)
+            next_y = int(delta_y * (step + 1) / steps)
+            prev_y = int(delta_y * step / steps)
+            relative_x = int((next_x - prev_x) / 2)
+            relative_y = int((next_y - prev_y) / 2)
+            if relative_x == 0 and relative_y == 0:
+                continue
             self.execute(
                 "input-send-event",
                 {
@@ -110,8 +123,9 @@ class QMPClient:
                     ]
                 },
             )
-            self._pointer_x = max(0, min(width - 1, self._pointer_x + relative_x * 2))
-            self._pointer_y = max(0, min(height - 1, self._pointer_y + relative_y * 2))
+            time.sleep(0.02)
+        self._pointer_x = x
+        self._pointer_y = y
         time.sleep(0.2)
 
     def mouse_button(self, down: bool) -> None:
@@ -136,23 +150,29 @@ class QMPClient:
         if self._hmp_pointer_x is None or self._hmp_pointer_y is None:
             self._hmp_pointer_x = width // 2
             self._hmp_pointer_y = height // 2
-        delta_x = int((x - self._hmp_pointer_x) / 2)
-        delta_y = int((y - self._hmp_pointer_y) / 2)
+        delta_x = x - self._hmp_pointer_x
+        delta_y = y - self._hmp_pointer_y
         self.execute(
             "human-monitor-command",
             {"command-line": "mouse_set 0"},
         )
-        if delta_x != 0 or delta_y != 0:
+        steps = max(1, (max(abs(delta_x), abs(delta_y)) + 39) // 40)
+        for step in range(steps):
+            next_x = int(delta_x * (step + 1) / steps)
+            prev_x = int(delta_x * step / steps)
+            next_y = int(delta_y * (step + 1) / steps)
+            prev_y = int(delta_y * step / steps)
+            move_x = int((next_x - prev_x) / 2)
+            move_y = int((next_y - prev_y) / 2)
+            if move_x == 0 and move_y == 0:
+                continue
             self.execute(
                 "human-monitor-command",
-                {"command-line": f"mouse_move {delta_x} {delta_y}"},
+                {"command-line": f"mouse_move {move_x} {move_y}"},
             )
-            self._hmp_pointer_x = max(
-                0, min(width - 1, self._hmp_pointer_x + delta_x * 2)
-            )
-            self._hmp_pointer_y = max(
-                0, min(height - 1, self._hmp_pointer_y + delta_y * 2)
-            )
+            time.sleep(0.02)
+        self._hmp_pointer_x = x
+        self._hmp_pointer_y = y
         time.sleep(0.2)
         self.execute(
             "human-monitor-command",
@@ -445,6 +465,11 @@ def main(argv: list[str]) -> int:
         initial_screenshot = client.screenshot(screenshot_path)
         assert_desktop_is_visible(initial_screenshot)
         width, height, _ = initial_screenshot
+        mice = client.execute(
+            "human-monitor-command",
+            {"command-line": "info mice"},
+        )
+        print(f"QEMU input devices: {mice}")
         # First try QMP's documented guest-input event path, using the absolute
         # coordinate range expected by QEMU. If this display backend does not route
         # input to the USB tablet, fall back to the real VNC/RFB host-pointer path.
