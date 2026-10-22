@@ -11,6 +11,15 @@ uint8_t astra_uart_get_byte(void) {
     return g_serial_byte;
 }
 
+/* The host unit test does not provide a real serial console. */
+void astra_uart_puts(const char *text) {
+    (void)text;
+}
+
+void astra_uart_put_hex(uint64_t value) {
+    (void)value;
+}
+
 #define CHECK(condition) \
     do { \
         if (!(condition)) { \
