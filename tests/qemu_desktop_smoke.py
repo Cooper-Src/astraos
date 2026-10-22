@@ -136,6 +136,12 @@ class VNCClient:
             self._socket.sendall(struct.pack("!BBHi", 2, 0, 1, 0))
             self._pointer_x = self.width // 2
             self._pointer_y = self.height // 2
+            # In ordinary RFB relative mode QEMU derives deltas from consecutive
+            # pointer coordinates and ignores the very first packet. Establish a
+            # neutral baseline before injecting the first movement.
+            self._rfb_x = 0x7FFF
+            self._rfb_y = 0x7FFF
+            self._socket.sendall(struct.pack("!BBHH", 5, 0, self._rfb_x, self._rfb_y))
         except Exception:
             self._socket.close()
             raise
@@ -153,11 +159,14 @@ class VNCClient:
         self._socket.close()
 
     def _send_relative(self, delta_x: int, delta_y: int, button_mask: int = 0) -> None:
-        # QEMU's relative VNC mode decodes each coordinate as coordinate - 0x7fff.
-        # Feeding literal framebuffer coordinates creates giant negative movement.
-        rfb_x = max(0, min(0xFFFF, 0x7FFF + delta_x))
-        rfb_y = max(0, min(0xFFFF, 0x7FFF + delta_y))
-        self._socket.sendall(struct.pack("!BBHH", 5, button_mask, rfb_x, rfb_y))
+        # Only the negotiated PointerTypeChange encoding uses x/y minus 0x7fff.
+        # This client advertises Raw only, so QEMU computes deltas from sequential
+        # RFB coordinates. Keep a stable baseline and advance coordinates by deltas.
+        self._rfb_x = max(0, min(0xFFFF, self._rfb_x + delta_x))
+        self._rfb_y = max(0, min(0xFFFF, self._rfb_y + delta_y))
+        self._socket.sendall(
+            struct.pack("!BBHH", 5, button_mask, self._rfb_x, self._rfb_y)
+        )
 
     def move(self, x: int, y: int) -> None:
         if self.width < 2 or self.height < 2:
