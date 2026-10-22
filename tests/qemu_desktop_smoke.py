@@ -84,25 +84,26 @@ class QMPClient:
 
 
 class QMPPointer:
-    """Inject pointer input through QMP instead of relying on VNC client semantics."""
-
-    ABS_MAX = 0x7FFFF
+    """Inject relative mouse and button events through QEMU's input layer."""
 
     def __init__(self, client: QMPClient, width: int, height: int) -> None:
         self._client = client
         self.width = width
         self.height = height
+        self._x = width // 2
+        self._y = height // 2
         self._buttons = 0
 
     def pointer(self, x: int, y: int, buttons: int = 0) -> None:
         x = max(0, min(x, self.width - 1))
         y = max(0, min(y, self.height - 1))
-        abs_x = round(x * self.ABS_MAX / max(1, self.width - 1))
-        abs_y = round(y * self.ABS_MAX / max(1, self.height - 1))
-        events: list[dict[str, Any]] = [
-            {"type": "abs", "data": {"axis": "x", "value": abs_x}},
-            {"type": "abs", "data": {"axis": "y", "value": abs_y}},
-        ]
+        delta_x = x - self._x
+        delta_y = y - self._y
+        events: list[dict[str, Any]] = []
+        if delta_x:
+            events.append({"type": "rel", "data": {"axis": "x", "value": delta_x}})
+        if delta_y:
+            events.append({"type": "rel", "data": {"axis": "y", "value": delta_y}})
         for mask, name in ((1, "left"), (2, "right")):
             before = bool(self._buttons & mask)
             after = bool(buttons & mask)
@@ -111,7 +112,10 @@ class QMPPointer:
                     "type": "btn",
                     "data": {"button": name, "down": after},
                 })
-        self._client.execute("input-send-event", {"events": events})
+        if events:
+            self._client.execute("input-send-event", {"events": events})
+        self._x = x
+        self._y = y
         self._buttons = buttons
 
 def read_log(path: Path) -> str:
