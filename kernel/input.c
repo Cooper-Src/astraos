@@ -30,7 +30,6 @@ static void *g_firmware_poll_event = NULL;
 static uint64_t g_firmware_exception_level = 0u;
 static uint64_t g_firmware_exception_vector = 0u;
 static uint64_t g_firmware_daif = 0u;
-static bool g_logged_pointer_state = false;
 static uint32_t g_input_debug_waits = 0u;
 static uint32_t g_input_debug_pointer_polls = 0u;
 
@@ -235,7 +234,6 @@ bool astra_input_initialize(const AstraBootInfo *boot_info, bool serial_ready) {
     g_firmware_exception_level = 0u;
     g_firmware_exception_vector = 0u;
     g_firmware_daif = 0u;
-    g_logged_pointer_state = false;
     g_input_debug_waits = 0u;
     g_input_debug_pointer_polls = 0u;
 
@@ -376,7 +374,6 @@ bool astra_input_read_event(AstraInputEvent *event_out) {
                     simple_status != ASTRA_INPUT_EFI_SUCCESS &&
                     simple_status != ASTRA_INPUT_EFI_UNSUPPORTED) {
                     g_simple_pointer = NULL;
-                    astra_uart_puts("desktop: Simple Pointer disabled after device error\n");
                     simple_ready = false;
                 }
             }
@@ -401,7 +398,6 @@ bool astra_input_read_event(AstraInputEvent *event_out) {
                     absolute_status != ASTRA_INPUT_EFI_SUCCESS &&
                     absolute_status != ASTRA_INPUT_EFI_UNSUPPORTED) {
                     g_absolute_pointer = NULL;
-                    astra_uart_puts("desktop: Absolute Pointer disabled after device error\n");
                     absolute_ready = false;
                 }
             }
@@ -421,17 +417,7 @@ bool astra_input_read_event(AstraInputEvent *event_out) {
                 event_out->right_button_down = simple_ready ?
                     simple_state.right_button != 0u :
                     (absolute_state.active_buttons & UINT32_C(2)) != 0u;
-                if (!g_logged_pointer_state) {
-                    g_logged_pointer_state = true;
-                    astra_uart_puts("desktop: UEFI Absolute Pointer event received x=");
-                    astra_uart_put_u32((uint32_t)absolute_state.current_x);
-                    astra_uart_puts(" y=");
-                    astra_uart_put_u32((uint32_t)absolute_state.current_y);
-                    astra_uart_puts(" left=");
-                    astra_uart_put_u32(event_out->left_button_down ? 1u : 0u);
-                    astra_uart_puts("\n");
-                }
-                return true;
+return true;
             }
 
             if (simple_ready) {
@@ -440,17 +426,7 @@ bool astra_input_read_event(AstraInputEvent *event_out) {
                 event_out->delta_y = simple_state.relative_y;
                 event_out->left_button_down = simple_state.left_button != 0u;
                 event_out->right_button_down = simple_state.right_button != 0u;
-                if (!g_logged_pointer_state) {
-                    g_logged_pointer_state = true;
-                    astra_uart_puts("desktop: UEFI Simple Pointer event received dx=");
-                    astra_uart_put_u32((uint32_t)simple_state.relative_x);
-                    astra_uart_puts(" dy=");
-                    astra_uart_put_u32((uint32_t)simple_state.relative_y);
-                    astra_uart_puts(" left=");
-                    astra_uart_put_u32(event_out->left_button_down ? 1u : 0u);
-                    astra_uart_puts("\n");
-                }
-                return true;
+return true;
             }
         }
 
