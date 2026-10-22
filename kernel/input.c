@@ -13,7 +13,7 @@ enum {
     ASTRA_INPUT_ASCII_MAX = 0x7f,
     ASTRA_INPUT_DAIF_IRQ_MASK_BIT = 7u,
     ASTRA_INPUT_VBAR_ALIGNMENT_MASK = 0x7ffu,
-    ASTRA_INPUT_EVENT_CAP = 3u
+    ASTRA_INPUT_EVENT_CAP = 4u
 };
 
 typedef struct AstraFirmwareCallState {
@@ -27,6 +27,7 @@ static AstraFirmwareSimplePointerProtocol *g_firmware_pointer = NULL;
 static AstraFirmwareAbsolutePointerProtocol *g_firmware_absolute_pointer = NULL;
 static AstraFirmwareWaitForEvent g_wait_for_event = NULL;
 static AstraFirmwareStall g_firmware_stall = NULL;
+static void *g_firmware_poll_event = NULL;
 static uint64_t g_firmware_exception_level = 0u;
 static uint64_t g_firmware_exception_vector = 0u;
 static uint64_t g_firmware_daif = 0u;
@@ -223,7 +224,7 @@ static bool firmware_stall(uint64_t microseconds) {
 
 static uint64_t firmware_wait_for_input(void) {
     AstraFirmwareCallState state = {0};
-    void *events[ASTRA_INPUT_EVENT_CAP] = {NULL, NULL, NULL};
+    void *events[ASTRA_INPUT_EVENT_CAP] = {NULL, NULL, NULL, NULL};
     uint64_t event_index = UINT64_MAX;
     uint64_t event_count = 0u;
     uint64_t status = ASTRA_INPUT_EFI_UNSUPPORTED;
@@ -242,6 +243,10 @@ static uint64_t firmware_wait_for_input(void) {
     if (g_firmware_absolute_pointer != NULL &&
         g_firmware_absolute_pointer->wait_for_input != NULL) {
         events[event_count] = g_firmware_absolute_pointer->wait_for_input;
+        event_count++;
+    }
+    if (g_firmware_poll_event != NULL) {
+        events[event_count] = g_firmware_poll_event;
         event_count++;
     }
     if (event_count == 0u) {
@@ -300,6 +305,7 @@ bool astra_input_initialize(const AstraBootInfo *boot_info, bool serial_ready) {
     g_firmware_absolute_pointer = NULL;
     g_wait_for_event = NULL;
     g_firmware_stall = NULL;
+    g_firmware_poll_event = NULL;
     g_firmware_exception_level = 0u;
     g_firmware_exception_vector = 0u;
     g_firmware_daif = 0u;
@@ -321,6 +327,7 @@ bool astra_input_initialize(const AstraBootInfo *boot_info, bool serial_ready) {
         g_firmware_input = boot_info->firmware_input_protocol;
         g_wait_for_event = boot_info->firmware_wait_for_event;
         g_firmware_stall = boot_info->firmware_stall;
+        g_firmware_poll_event = boot_info->firmware_poll_event;
         g_firmware_exception_level = boot_info->firmware_exception_level;
         g_firmware_exception_vector = boot_info->firmware_exception_vector;
         g_firmware_daif = boot_info->firmware_daif;
@@ -357,6 +364,7 @@ bool astra_input_initialize(const AstraBootInfo *boot_info, bool serial_ready) {
         g_firmware_absolute_pointer = NULL;
         g_wait_for_event = NULL;
         g_firmware_stall = NULL;
+        g_firmware_poll_event = NULL;
         g_firmware_exception_level = 0u;
         g_firmware_exception_vector = 0u;
         g_firmware_daif = 0u;
@@ -449,12 +457,16 @@ bool astra_input_read_event(AstraInputEvent *event_out) {
             }
         }
 
-        if (astra_input_pointer_available() && firmware_stall(UINT64_C(1000))) {
-            continue;
-        }
-
+        /*
+         * The periodic poll event is part of WaitForEvent when pointer input
+         * is available. Returning to firmware at that cadence lets UEFI USB
+         * drivers service reports before the next GetState() call.
+         */
         status = firmware_wait_for_input();
         if (status != ASTRA_INPUT_EFI_SUCCESS) {
+            if (astra_input_pointer_available() && firmware_stall(UINT64_C(1000))) {
+                continue;
+            }
             return false;
         }
     }
