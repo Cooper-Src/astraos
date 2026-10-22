@@ -120,8 +120,43 @@ def type_command(client: QMPClient, command: str) -> None:
 
 
 
+def find_qemu_window() -> str:
+    deadline = time.monotonic() + CONNECT_TIMEOUT
+    last_error = ""
+    while time.monotonic() < deadline:
+        result = subprocess.run(
+            ["xdotool", "search", "--onlyvisible", "--name", "QEMU"],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        window_ids = result.stdout.split()
+        for window_id in window_ids:
+            geometry = subprocess.run(
+                ["xdotool", "getwindowgeometry", "--shell", window_id],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            if geometry.returncode == 0:
+                values: dict[str, int] = {}
+                for line in geometry.stdout.splitlines():
+                    if "=" in line:
+                        name, value = line.split("=", 1)
+                        if name in {"WIDTH", "HEIGHT"}:
+                            try:
+                                values[name] = int(value)
+                            except ValueError:
+                                pass
+                if values.get("WIDTH", 0) >= 480 and values.get("HEIGHT", 0) >= 360:
+                    return window_id
+        last_error = result.stderr.strip()
+        time.sleep(0.1)
+    raise TimeoutError(f"could not find the visible QEMU GTK window: {last_error}")
+
+
 def move_mouse_to(
-    client: QMPClient,
+    window_id: str,
     current_x: int,
     current_y: int,
     target_x: int,
@@ -129,33 +164,24 @@ def move_mouse_to(
     screen_width: int,
     screen_height: int,
 ) -> tuple[int, int]:
-    del current_x, current_y
-    if screen_width < 2 or screen_height < 2:
-        raise ValueError("invalid framebuffer dimensions for pointer mapping")
-    x_value = int(round(target_x * 32767 / (screen_width - 1)))
-    y_value = int(round(target_y * 32767 / (screen_height - 1)))
-    client.execute(
-        "input-send-event",
-        {
-            "events": [
-                {"type": "abs", "data": {"axis": "x", "value": x_value}},
-                {"type": "abs", "data": {"axis": "y", "value": y_value}},
-            ]
-        },
+    if target_x < 0 or target_x >= screen_width or target_y < 0 or target_y >= screen_height:
+        raise ValueError("mouse target falls outside the guest framebuffer")
+    subprocess.run(
+        ["xdotool", "mousemove", "--window", window_id, str(target_x), str(target_y)],
+        check=True,
+        capture_output=True,
+        text=True,
     )
     time.sleep(0.2)
     return target_x, target_y
 
 
-def click_mouse(client: QMPClient) -> None:
-    client.execute(
-        "input-send-event",
-        {"events": [{"type": "btn", "data": {"down": True, "button": "left"}}]},
-    )
-    time.sleep(0.2)
-    client.execute(
-        "input-send-event",
-        {"events": [{"type": "btn", "data": {"down": False, "button": "left"}}]},
+def click_mouse(window_id: str, x: int, y: int) -> None:
+    subprocess.run(
+        ["xdotool", "mousemove", "--window", window_id, str(x), str(y), "click", "1"],
+        check=True,
+        capture_output=True,
+        text=True,
     )
     time.sleep(0.2)
 
@@ -268,18 +294,19 @@ def main(argv: list[str]) -> int:
         wait_for_log(log_path, "ASTRAOS_DISPLAY_SERVER_READY", BOOT_TIMEOUT)
         wait_for_log(log_path, "ASTRAOS_POINTER_INPUT_READY", EVENT_TIMEOUT)
         screen_width, screen_height = capture_and_verify_desktop(client, screenshot_path)
+        qemu_window = find_qemu_window()
         mouse_x = screen_width // 2
         mouse_y = screen_height // 2
 
         mouse_x, mouse_y = move_mouse_to(
-            client, mouse_x, mouse_y, 80, 20, screen_width, screen_height
+            qemu_window, mouse_x, mouse_y, 80, 20, screen_width, screen_height
         )
-        click_mouse(client)
+        click_mouse(qemu_window, mouse_x, mouse_y)
         wait_for_log(log_path, "desktop: applications menu opened by pointer", EVENT_TIMEOUT)
         mouse_x, mouse_y = move_mouse_to(
-            client, mouse_x, mouse_y, 80, 95, screen_width, screen_height
+            qemu_window, mouse_x, mouse_y, 80, 95, screen_width, screen_height
         )
-        click_mouse(client)
+        click_mouse(qemu_window, mouse_x, mouse_y)
         wait_for_log(log_path, "desktop: terminal window opened by pointer", EVENT_TIMEOUT)
 
         type_command(client, "help")
@@ -290,14 +317,14 @@ def main(argv: list[str]) -> int:
         wait_for_log(log_path, "desktop: terminal command ls", EVENT_TIMEOUT)
 
         mouse_x, mouse_y = move_mouse_to(
-            client, mouse_x, mouse_y, 80, 20, screen_width, screen_height
+            qemu_window, mouse_x, mouse_y, 80, 20, screen_width, screen_height
         )
-        click_mouse(client)
+        click_mouse(qemu_window, mouse_x, mouse_y)
         wait_for_log(log_path, "desktop: applications menu opened by pointer", EVENT_TIMEOUT)
         mouse_x, mouse_y = move_mouse_to(
-            client, mouse_x, mouse_y, 80, 119, screen_width, screen_height
+            qemu_window, mouse_x, mouse_y, 80, 119, screen_width, screen_height
         )
-        click_mouse(client)
+        click_mouse(qemu_window, mouse_x, mouse_y)
         wait_for_log(log_path, "desktop: file browser opened by pointer", EVENT_TIMEOUT)
 
         file_window_width = min(720, screen_width - 40)
@@ -309,22 +336,22 @@ def main(argv: list[str]) -> int:
         file_x = min(file_x, screen_width - file_window_width - 8)
         file_y = min(file_y, screen_height - 54 - file_window_height - 8)
         mouse_x, mouse_y = move_mouse_to(
-            client, mouse_x, mouse_y, file_x + 220, file_y + 76,
+            qemu_window, mouse_x, mouse_y, file_x + 220, file_y + 76,
             screen_width, screen_height
         )
-        click_mouse(client)
+        click_mouse(qemu_window, mouse_x, mouse_y)
         wait_for_log(log_path, "desktop: file selected by pointer", EVENT_TIMEOUT)
-        click_mouse(client)
+        click_mouse(qemu_window, mouse_x, mouse_y)
         wait_for_log(log_path, "desktop: files directory opened", EVENT_TIMEOUT)
 
-        click_mouse(client)
-        click_mouse(client)
+        click_mouse(qemu_window, mouse_x, mouse_y)
+        click_mouse(qemu_window, mouse_x, mouse_y)
         wait_for_log(log_path, "desktop: text viewer opened", EVENT_TIMEOUT)
 
         mouse_x, mouse_y = move_mouse_to(
-            client, mouse_x, mouse_y, 280, 20, screen_width, screen_height
+            qemu_window, mouse_x, mouse_y, 280, 20, screen_width, screen_height
         )
-        click_mouse(client)
+        click_mouse(qemu_window, mouse_x, mouse_y)
         wait_for_log(log_path, "desktop: task button focused by pointer", EVENT_TIMEOUT)
         type_command(client, "whoami")
         type_command(client, "exit")
