@@ -124,7 +124,7 @@ class VNCClient:
             # Complete the basic RFB client setup and request the first framebuffer.
             # Raw is deliberately the only encoding requested, making updates bounded
             # and independent of optional VNC extensions.
-            self._socket.sendall(b"\\x00\\x00\\x00\\x00" + server_init[4:20])
+            self._socket.sendall(b"\x00\x00\x00\x00" + server_init[4:20])
             self._socket.sendall(struct.pack("!BBH", 2, 0, 1) + struct.pack("!i", 0))
             self._socket.sendall(
                 struct.pack("!BBHHHH", 3, 0, 0, 0, self.width, self.height)
