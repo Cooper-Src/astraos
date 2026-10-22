@@ -580,7 +580,7 @@ static bool configure_firmware_keyboard_console(
         if (pointer->get_state != NULL && pointer->wait_for_input != NULL) {
             boot_info->firmware_pointer_protocol = pointer;
             boot_info->flags |= ASTRA_BOOT_FLAG_UEFI_POINTER;
-            loader_out(L"UEFI Simple Pointer protocol discovered.\\r\\n");
+            loader_out(L"UEFI Simple Pointer protocol discovered.\r\n");
         }
     }
     return true;
