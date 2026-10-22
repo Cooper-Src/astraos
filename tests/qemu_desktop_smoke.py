@@ -124,6 +124,41 @@ class QMPClient:
         self.mouse_button(True)
         self.mouse_button(False)
 
+
+    def hmp_click(self, x: int, y: int, width: int, height: int) -> None:
+        """Use QEMU's active-mouse monitor API as a second independent input route."""
+        if width < 2 or height < 2:
+            raise ValueError("framebuffer dimensions are too small for pointer input")
+        x = max(0, min(x, width - 1))
+        y = max(0, min(y, height - 1))
+        if self._pointer_x is None or self._pointer_y is None:
+            self._pointer_x = width // 2
+            self._pointer_y = height // 2
+        delta_x = int((x - self._pointer_x) / 2)
+        delta_y = int((y - self._pointer_y) / 2)
+        if delta_x != 0 or delta_y != 0:
+            self.execute(
+                "human-monitor-command",
+                {"command-line": "mouse_set 0"},
+            )
+            self.execute(
+                "human-monitor-command",
+                {"command-line": f"mouse_move {delta_x} {delta_y}"},
+            )
+            self._pointer_x = max(0, min(width - 1, self._pointer_x + delta_x * 2))
+            self._pointer_y = max(0, min(height - 1, self._pointer_y + delta_y * 2))
+        time.sleep(0.2)
+        self.execute(
+            "human-monitor-command",
+            {"command-line": "mouse_button 1"},
+        )
+        time.sleep(0.15)
+        self.execute(
+            "human-monitor-command",
+            {"command-line": "mouse_button 0"},
+        )
+        time.sleep(0.15)
+
     def screenshot(self, path: Path) -> tuple[int, int, Counter[tuple[int, int, int]]]:
         self.execute("human-monitor-command", {"command-line": f"screendump {path}"})
         return read_ppm(path)
@@ -404,17 +439,25 @@ def main(argv: list[str]) -> int:
             wait_for_log(log_path, "desktop: applications menu opened", 1.5)
             print("Desktop pointer test used QMP absolute input events.")
         except TimeoutError:
-            mouse = VNCClient()
-            if mouse.width != width or mouse.height != height:
-                raise RuntimeError(
-                    f"VNC/QMP size mismatch: VNC={mouse.width}x{mouse.height}, "
-                    f"QMP={width}x{height}"
-                )
-            pointer = mouse
-            mouse.click(75, 20, width, height)
-            wait_for_log(log_path, "desktop: pointer report", EVENT_TIMEOUT)
-            wait_for_log(log_path, "desktop: applications menu opened", EVENT_TIMEOUT)
-            print("Desktop pointer test used VNC/RFB absolute input events.")
+            # QEMU's HMP mouse_set/mouse_move API explicitly selects its active
+            # emulated mouse, which is useful when several input backends exist.
+            client.hmp_click(75, 20, width, height)
+            try:
+                wait_for_log(log_path, "desktop: pointer report", EVENT_TIMEOUT)
+                wait_for_log(log_path, "desktop: applications menu opened", EVENT_TIMEOUT)
+                print("Desktop pointer test used the QEMU active-mouse monitor API.")
+            except TimeoutError:
+                mouse = VNCClient()
+                if mouse.width != width or mouse.height != height:
+                    raise RuntimeError(
+                        f"VNC/QMP size mismatch: VNC={mouse.width}x{mouse.height}, "
+                        f"QMP={width}x{height}"
+                    )
+                pointer = mouse
+                mouse.click(75, 20, width, height)
+                wait_for_log(log_path, "desktop: pointer report", EVENT_TIMEOUT)
+                wait_for_log(log_path, "desktop: applications menu opened", EVENT_TIMEOUT)
+                print("Desktop pointer test used VNC/RFB absolute input events.")
         menu_screenshot = client.screenshot(screenshot_path)
         if menu_screenshot[2] == initial_screenshot[2]:
             raise RuntimeError("opening Applications did not change the captured desktop")
