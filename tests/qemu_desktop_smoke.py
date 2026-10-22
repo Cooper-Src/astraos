@@ -83,88 +83,36 @@ class QMPClient:
         self.execute("human-monitor-command", {"command-line": f"sendkey {key}"})
 
 
-class VNCClient:
-    """Minimal RFB 3.8 client used to send host-side pointer events to QEMU."""
+class QMPPointer:
+    """Inject pointer input through QMP instead of relying on VNC client semantics."""
 
-    def __init__(self, host: str, port: int) -> None:
-        self._socket = socket.create_connection((host, port), timeout=CONNECT_TIMEOUT)
-        self._socket.settimeout(COMMAND_TIMEOUT)
-        try:
-            version = self._read_exact(12)
-            if not version.startswith(b"RFB 003."):
-                raise RuntimeError(f"unexpected VNC protocol banner: {version!r}")
-            self._socket.sendall(b"RFB 003.008\n")
+    ABS_MAX = 0x7FFFF
 
-            security_count = self._read_exact(1)[0]
-            if security_count == 0:
-                reason_length = struct.unpack("!I", self._read_exact(4))[0]
-                reason = self._read_exact(reason_length).decode("utf-8", errors="replace")
-                raise RuntimeError(f"VNC server refused connection: {reason}")
-            security_types = self._read_exact(security_count)
-            if 1 not in security_types:
-                raise RuntimeError(
-                    f"VNC smoke test expects loopback 'None' security, got {list(security_types)}"
-                )
-            self._socket.sendall(b"\x01")
-            security_result = struct.unpack("!I", self._read_exact(4))[0]
-            if security_result != 0:
-                raise RuntimeError(f"VNC security handshake failed: {security_result}")
-
-            self._socket.sendall(b"\x01")  # ClientInit: shared session.
-            server_init = self._read_exact(24)
-            self.width, self.height = struct.unpack("!HH", server_init[:4])
-            bits_per_pixel = server_init[4]
-            if bits_per_pixel not in (8, 16, 32):
-                raise RuntimeError(f"unsupported VNC pixel format: {bits_per_pixel} bits/pixel")
-            name_length = struct.unpack("!I", server_init[20:24])[0]
-            self._read_exact(name_length)
-            if self.width < 1 or self.height < 1:
-                raise RuntimeError(f"invalid VNC screen size: {self.width}x{self.height}")
-
-            # Complete the basic RFB client setup and request the first framebuffer.
-            # Raw is deliberately the only encoding requested, making updates bounded
-            # and independent of optional VNC extensions.
-            self._socket.sendall(b"\x00\x00\x00\x00" + server_init[4:20])
-            self._socket.sendall(struct.pack("!BBH", 2, 0, 1) + struct.pack("!i", 0))
-            self._socket.sendall(
-                struct.pack("!BBHHHH", 3, 0, 0, 0, self.width, self.height)
-            )
-            update_header = self._read_exact(4)
-            if update_header[0] != 0:
-                raise RuntimeError(f"expected VNC framebuffer update, got type {update_header[0]}")
-            rect_count = struct.unpack("!H", update_header[2:4])[0]
-            pixel_bytes = bits_per_pixel // 8
-            for _ in range(rect_count):
-                rectangle = self._read_exact(12)
-                rect_width, rect_height = struct.unpack("!HH", rectangle[4:8])
-                encoding = struct.unpack("!i", rectangle[8:12])[0]
-                if encoding == 0:  # Raw rectangle.
-                    self._read_exact(rect_width * rect_height * pixel_bytes)
-                elif encoding == 1:  # CopyRect.
-                    self._read_exact(4)
-                else:
-                    raise RuntimeError(f"unexpected VNC encoding {encoding} in raw-only session")
-        except Exception:
-            self._socket.close()
-            raise
-
-    def _read_exact(self, size: int) -> bytes:
-        data = bytearray()
-        while len(data) < size:
-            chunk = self._socket.recv(size - len(data))
-            if not chunk:
-                raise RuntimeError("VNC server closed the connection")
-            data.extend(chunk)
-        return bytes(data)
-
-    def close(self) -> None:
-        self._socket.close()
+    def __init__(self, client: QMPClient, width: int, height: int) -> None:
+        self._client = client
+        self.width = width
+        self.height = height
+        self._buttons = 0
 
     def pointer(self, x: int, y: int, buttons: int = 0) -> None:
         x = max(0, min(x, self.width - 1))
         y = max(0, min(y, self.height - 1))
-        self._socket.sendall(struct.pack("!BBHH", 5, buttons & 0xFF, x, y))
-
+        abs_x = round(x * self.ABS_MAX / max(1, self.width - 1))
+        abs_y = round(y * self.ABS_MAX / max(1, self.height - 1))
+        events: list[dict[str, Any]] = [
+            {"type": "abs", "data": {"axis": "x", "value": abs_x}},
+            {"type": "abs", "data": {"axis": "y", "value": abs_y}},
+        ]
+        for mask, name in ((1, "left"), (2, "right")):
+            before = bool(self._buttons & mask)
+            after = bool(buttons & mask)
+            if before != after:
+                events.append({
+                    "type": "btn",
+                    "data": {"button": name, "down": after},
+                })
+        self._client.execute("input-send-event", {"events": events})
+        self._buttons = buttons
 
 def read_log(path: Path) -> str:
     try:
@@ -259,8 +207,7 @@ def save_and_check_screenshot(client: QMPClient, path: Path) -> tuple[int, int]:
 
 
 def click_at(
-    client: QMPClient,
-    pointer: VNCClient,
+    pointer: QMPPointer,
     log_path: Path,
     x: int,
     y: int,
@@ -292,20 +239,15 @@ def type_command(client: QMPClient, command: str) -> None:
 
 
 def main(argv: list[str]) -> int:
-    if len(argv) != 5:
-        print(f"usage: {argv[0]} QMP_SOCKET SERIAL_LOG SCREENSHOT_PPM VNC_PORT", file=sys.stderr)
+    if len(argv) != 4:
+        print(f"usage: {argv[0]} QMP_SOCKET SERIAL_LOG SCREENSHOT_PPM", file=sys.stderr)
         return 2
 
     socket_path = argv[1]
     log_path = Path(argv[2])
     screenshot_path = Path(argv[3])
-    try:
-        vnc_port = int(argv[4])
-    except ValueError:
-        print("VNC_PORT must be an integer", file=sys.stderr)
-        return 2
     client: QMPClient | None = None
-    pointer: VNCClient | None = None
+    pointer: QMPPointer | None = None
     try:
         connect_deadline = time.monotonic() + CONNECT_TIMEOUT
         last_error: OSError | None = None
@@ -323,25 +265,8 @@ def main(argv: list[str]) -> int:
         wait_for_log(log_path, "ASTRAOS_POINTER_INPUT_READY", BOOT_TIMEOUT)
         screen_width, screen_height = save_and_check_screenshot(client, screenshot_path)
 
-        vnc_deadline = time.monotonic() + CONNECT_TIMEOUT
-        last_vnc_error: OSError | None = None
-        while time.monotonic() < vnc_deadline:
-            try:
-                pointer = VNCClient("127.0.0.1", vnc_port)
-                break
-            except OSError as error:
-                last_vnc_error = error
-                time.sleep(0.1)
-        if pointer is None:
-            raise RuntimeError(
-                f"could not connect to QEMU VNC input port {vnc_port}: {last_vnc_error}"
-            )
-        if (pointer.width, pointer.height) != (screen_width, screen_height):
-            raise RuntimeError(
-                f"VNC/QMP display sizes differ: {pointer.width}x{pointer.height} vs "
-                f"{screen_width}x{screen_height}"
-            )
-        print(f"Connected to VNC pointer input: {pointer.width}x{pointer.height}.")
+        pointer = QMPPointer(client, screen_width, screen_height)
+        print(f"QMP pointer input ready: {pointer.width}x{pointer.height}.")
         client.send_key("t")
         wait_for_log(log_path, "desktop: terminal window opened", EVENT_TIMEOUT)
         type_command(client, "help")
@@ -367,29 +292,29 @@ def main(argv: list[str]) -> int:
 
         start_marker = "desktop: mouse start menu opened"
         click_at(
-            client, pointer, log_path, 90, 20, start_marker, 1
+            pointer, log_path, 90, 20, start_marker, 1
         )
         # Capture the actual start menu too, so CI verifies more than a boot marker.
         save_and_check_screenshot(client, screenshot_path)
 
         click_at(
-            client, pointer, log_path, 90, 121, "desktop: mouse files opened", 1
+            pointer, log_path, 90, 121, "desktop: mouse files opened", 1
         )
         # Taskbar buttons must minimise the active app and restore it on the next click.
         click_at(
-            client, pointer, log_path, min(272, screen_width - 20), 20,
+            pointer, log_path, min(272, screen_width - 20), 20,
             "desktop: mouse task minimized", 1
         )
         click_at(
-            client, pointer, log_path, min(272, screen_width - 20), 20,
+            pointer, log_path, min(272, screen_width - 20), 20,
             "desktop: mouse task restored", 1
         )
 
         click_at(
-            client, pointer, log_path, 90, 20, start_marker, 2
+            pointer, log_path, 90, 20, start_marker, 2
         )
         click_at(
-            client, pointer, log_path, 90, 94, "desktop: mouse terminal opened", 1
+            pointer, log_path, 90, 94, "desktop: mouse terminal opened", 1
         )
         type_command(client, "help")
         wait_for_log_occurrence(
@@ -400,10 +325,10 @@ def main(argv: list[str]) -> int:
             log_path, "desktop: terminal window closed", 2, EVENT_TIMEOUT
         )
         click_at(
-            client, pointer, log_path, 90, 20, start_marker, 3
+            pointer, log_path, 90, 20, start_marker, 3
         )
         click_at(
-            client, pointer, log_path, 90, 174, "desktop: mouse returned to shell", 1
+            pointer, log_path, 90, 174, "desktop: mouse returned to shell", 1
         )
         wait_for_log(log_path, "desktop: returned to shell", EVENT_TIMEOUT)
         print("AstraOS desktop smoke test passed: framebuffer pixels, keyboard, terminal, Files, mouse clicks, start menu, taskbar minimise/restore and return-to-shell all worked.")
@@ -414,8 +339,6 @@ def main(argv: list[str]) -> int:
         print(read_log(log_path)[-6000:], file=sys.stderr)
         return 1
     finally:
-        if pointer is not None:
-            pointer.close()
         if client is not None:
             client.close()
 
