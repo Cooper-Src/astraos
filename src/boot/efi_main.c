@@ -238,6 +238,11 @@ static EFI_GUID g_graphics_output_guid = {
     0x9042a9deu, 0x23dcu, 0x4a38u,
     {0x96u, 0xfbu, 0x7au, 0xdeu, 0xd0u, 0x80u, 0x51u, 0x6au}
 };
+
+static EFI_GUID g_simple_pointer_guid = {
+    0x31878c87u, 0xb75u, 0x11d5u,
+    {0x9au, 0x4fu, 0x00u, 0x90u, 0x27u, 0x3fu, 0xc1u, 0x4du}
+};
 static const EFI_GUID g_dtb_table_guid = {
     0xb1b621d5u, 0xf19cu, 0x41a5u,
     {0x83u, 0x0bu, 0xd9u, 0x15u, 0x2cu, 0x69u, 0xaau, 0xe0u}
@@ -520,6 +525,9 @@ static bool configure_firmware_keyboard_console(
     EFI_SYSTEM_TABLE *system_table
 ) {
     EFI_SIMPLE_TEXT_INPUT_PROTOCOL *input = NULL;
+    AstraFirmwareSimplePointerProtocol *pointer = NULL;
+    void *pointer_interface = NULL;
+    EFI_STATUS pointer_status = EFI_NOT_FOUND;
     EFI_UINT64 current_el = 0u;
     EFI_UINT64 daif = 0u;
     EFI_UINT64 vector = 0u;
@@ -555,11 +563,26 @@ static bool configure_firmware_keyboard_console(
     boot_info->flags = ASTRA_BOOT_FLAG_BOOT_SERVICES_ACTIVE |
         ASTRA_BOOT_FLAG_UEFI_TEXT_INPUT;
     boot_info->firmware_input_protocol = (AstraFirmwareTextInputProtocol *)input;
+    boot_info->firmware_pointer_protocol = NULL;
     boot_info->firmware_wait_for_event = system_table->BootServices->WaitForEvent;
     boot_info->firmware_exception_level = exception_level;
     boot_info->firmware_exception_vector = vector;
     /* UEFI input/timer events need IRQ delivery while firmware vectors are active. */
     boot_info->firmware_daif = daif & ~(UINT64_C(1) << 7u);
+
+    if (system_table->BootServices->LocateProtocol != NULL) {
+        pointer_status = system_table->BootServices->LocateProtocol(
+            &g_simple_pointer_guid, NULL, &pointer_interface
+        );
+    }
+    if (pointer_status == EFI_SUCCESS && pointer_interface != NULL) {
+        pointer = (AstraFirmwareSimplePointerProtocol *)pointer_interface;
+        if (pointer->get_state != NULL && pointer->wait_for_input != NULL) {
+            boot_info->firmware_pointer_protocol = pointer;
+            boot_info->flags |= ASTRA_BOOT_FLAG_UEFI_POINTER;
+            loader_out(L"UEFI Simple Pointer protocol discovered.\\r\\n");
+        }
+    }
     return true;
 }
 
@@ -1106,6 +1129,7 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *system_table) {
     capture_acpi_rsdp(system_table, &g_boot_info);
     g_boot_info.flags = 0u;
     g_boot_info.firmware_input_protocol = NULL;
+    g_boot_info.firmware_pointer_protocol = NULL;
     g_boot_info.firmware_wait_for_event = NULL;
     g_boot_info.firmware_exception_level = 0u;
     g_boot_info.firmware_exception_vector = 0u;
