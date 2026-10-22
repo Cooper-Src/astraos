@@ -27,6 +27,8 @@ static AstraFirmwareTextInputProtocol *g_firmware_input = NULL;
 static AstraFirmwareSimplePointerProtocol *g_firmware_pointer = NULL;
 static AstraFirmwareAbsolutePointerProtocol *g_firmware_absolute_pointer = NULL;
 static AstraFirmwareWaitForEvent g_wait_for_event = NULL;
+static void *g_firmware_poll_timer_event = NULL;
+static bool g_pointer_polling_active = false;
 static uint32_t g_pointer_screen_width = 1u;
 static uint32_t g_pointer_screen_height = 1u;
 static uint64_t g_firmware_exception_level = 0u;
@@ -269,7 +271,7 @@ static uint32_t absolute_axis_to_pixel(
 
 static uint64_t firmware_wait_for_input(void) {
     AstraFirmwareCallState state = {0};
-    void *events[3] = {NULL, NULL, NULL};
+    void *events[4] = {NULL, NULL, NULL, NULL};
     uint64_t event_index = UINT64_MAX;
     uint64_t event_count = UINT64_C(1);
     uint64_t status = ASTRA_INPUT_EFI_UNSUPPORTED;
@@ -286,6 +288,10 @@ static uint64_t firmware_wait_for_input(void) {
     }
     if (g_firmware_pointer != NULL && g_firmware_pointer->wait_for_input != NULL) {
         events[event_count] = g_firmware_pointer->wait_for_input;
+        event_count++;
+    }
+    if (g_pointer_polling_active && g_firmware_poll_timer_event != NULL) {
+        events[event_count] = g_firmware_poll_timer_event;
         event_count++;
     }
 
@@ -324,6 +330,8 @@ bool astra_input_initialize(const AstraBootInfo *boot_info, bool serial_ready) {
     g_firmware_pointer = NULL;
     g_firmware_absolute_pointer = NULL;
     g_wait_for_event = NULL;
+    g_firmware_poll_timer_event = NULL;
+    g_pointer_polling_active = false;
     g_firmware_exception_level = 0u;
     g_firmware_exception_vector = 0u;
     g_firmware_daif = 0u;
@@ -348,6 +356,7 @@ bool astra_input_initialize(const AstraBootInfo *boot_info, bool serial_ready) {
             (uint64_t)ASTRA_INPUT_VBAR_ALIGNMENT_MASK) == 0u) {
         g_firmware_input = boot_info->firmware_input_protocol;
         g_wait_for_event = boot_info->firmware_wait_for_event;
+        g_firmware_poll_timer_event = boot_info->firmware_poll_timer_event;
         g_firmware_exception_level = boot_info->firmware_exception_level;
         g_firmware_exception_vector = boot_info->firmware_exception_vector;
         g_firmware_daif = boot_info->firmware_daif;
@@ -377,6 +386,7 @@ bool astra_input_initialize(const AstraBootInfo *boot_info, bool serial_ready) {
         g_firmware_pointer = NULL;
         g_firmware_absolute_pointer = NULL;
         g_wait_for_event = NULL;
+        g_firmware_poll_timer_event = NULL;
         g_firmware_exception_level = 0u;
         g_firmware_exception_vector = 0u;
         g_firmware_daif = 0u;
@@ -392,6 +402,10 @@ bool astra_input_initialize(const AstraBootInfo *boot_info, bool serial_ready) {
 
 bool astra_input_pointer_available(void) {
     return g_firmware_pointer != NULL || g_firmware_absolute_pointer != NULL;
+}
+
+void astra_input_set_pointer_polling(bool enabled) {
+    g_pointer_polling_active = enabled;
 }
 
 bool astra_input_read_event(AstraInputEvent *event_out) {

@@ -34,6 +34,7 @@ bool astra_input_read_event(AstraInputEvent *event_out);
 bool astra_input_read_byte(uint8_t *byte_out);
 
 bool astra_input_pointer_available(void);
+void astra_input_set_pointer_polling(bool enabled);
 
 /* Converts a UEFI Unicode key to the shell's ASCII input stream. */
 bool astra_input_translate_key(uint16_t unicode_char, uint8_t *byte_out);

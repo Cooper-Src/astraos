@@ -1354,6 +1354,7 @@ static void render_desktop(void) {
 }
 
 static void stop_display_server(void) {
+    astra_input_set_pointer_polling(false);
     g_menu_open = false;
     astra_framebuffer_set_console_enabled(true);
     astra_framebuffer_clear();
@@ -1712,6 +1713,7 @@ bool astra_display_server_run(void) {
     g_pointer_drag_surface = NULL;
     g_pointer_x = g_screen_width / 2u;
     g_pointer_y = g_screen_height / 2u;
+    astra_input_set_pointer_polling(true);
 
     astra_framebuffer_set_console_enabled(false);
     open_surface(DISPLAY_APP_WELCOME);

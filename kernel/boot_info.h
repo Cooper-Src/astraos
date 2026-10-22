@@ -4,7 +4,7 @@
 #include <stdint.h>
 
 #define ASTRA_BOOT_INFO_MAGIC UINT64_C(0x4153545241424f4f)
-#define ASTRA_BOOT_INFO_VERSION UINT64_C(6)
+#define ASTRA_BOOT_INFO_VERSION UINT64_C(7)
 #define ASTRA_BOOT_MEMORY_MAP_CAP_BYTES (UINT64_C(16384) * UINT64_C(8))
 
 #define ASTRA_BOOT_FLAG_BOOT_SERVICES_ACTIVE (UINT64_C(1) << 0u)
@@ -139,6 +139,7 @@ typedef struct AstraBootInfo {
     AstraFirmwareSimplePointerProtocol *firmware_pointer_protocol;
     AstraFirmwareAbsolutePointerProtocol *firmware_absolute_pointer_protocol;
     AstraFirmwareWaitForEvent firmware_wait_for_event;
+    void *firmware_poll_timer_event;
     uint64_t firmware_exception_level;
     uint64_t firmware_exception_vector;
     uint64_t firmware_daif;
