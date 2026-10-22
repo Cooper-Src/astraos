@@ -1454,18 +1454,23 @@ static AstraDisplaySurface *surface_at(uint32_t x, uint32_t y) {
     return selected;
 }
 
-static bool handle_menu_pointer_press(uint32_t x, uint32_t y) {
+static bool handle_menu_pointer_press(uint32_t x, uint32_t y, bool *handled_out) {
     const uint32_t menu_x = 12u;
     const uint32_t menu_y = DISPLAY_PANEL_HEIGHT + 5u;
     const uint32_t menu_width = 220u;
     const uint32_t menu_height = 150u;
 
+    if (handled_out == NULL) {
+        return false;
+    }
+    *handled_out = false;
     if (!g_menu_open) {
         return false;
     }
     if (x >= menu_x && x < menu_x + menu_width &&
         y >= menu_y && y < menu_y + menu_height) {
         const uint32_t row = y - menu_y;
+        *handled_out = true;
         g_menu_open = false;
         if (row >= 34u && row < 59u) {
             open_surface(DISPLAY_APP_TERMINAL);
@@ -1488,11 +1493,15 @@ static bool handle_menu_pointer_press(uint32_t x, uint32_t y) {
 
 static bool handle_mouse_press(uint32_t x, uint32_t y) {
     AstraDisplaySurface *surface = NULL;
+    bool menu_handled = false;
     const uint32_t panel_right_edge =
         g_screen_width > 126u ? g_screen_width - 126u : 0u;
 
-    if (handle_menu_pointer_press(x, y)) {
+    if (handle_menu_pointer_press(x, y, &menu_handled)) {
         return true;
+    }
+    if (menu_handled) {
+        return false;
     }
     if (y < DISPLAY_PANEL_HEIGHT) {
         if (x < 145u) {
