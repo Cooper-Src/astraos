@@ -30,6 +30,8 @@ static void *g_firmware_poll_event = NULL;
 static uint64_t g_firmware_exception_level = 0u;
 static uint64_t g_firmware_exception_vector = 0u;
 static uint64_t g_firmware_daif = 0u;
+static uint32_t g_input_debug_waits = 0u;
+static uint32_t g_input_debug_pointer_polls = 0u;
 
 #if defined(__aarch64__)
 /* Firmware services need their original vector table and an unmasked IRQ path. */
@@ -359,6 +361,14 @@ bool astra_input_read_event(AstraInputEvent *event_out) {
             if (g_simple_pointer != NULL) {
                 simple_status = firmware_read_simple_pointer(&simple_state);
                 simple_ready = simple_status == ASTRA_INPUT_EFI_SUCCESS;
+#if defined(__aarch64__)
+                if (g_input_debug_pointer_polls < 4u) {
+                    g_input_debug_pointer_polls++;
+                    astra_uart_puts("desktop: UEFI Simple Pointer GetState=");
+                    astra_uart_put_u32((uint32_t)simple_status);
+                    astra_uart_puts("\n");
+                }
+#endif
                 if (simple_status != ASTRA_INPUT_EFI_NOT_READY &&
                     simple_status != ASTRA_INPUT_EFI_SUCCESS &&
                     simple_status != ASTRA_INPUT_EFI_UNSUPPORTED) {
@@ -376,6 +386,14 @@ bool astra_input_read_event(AstraInputEvent *event_out) {
                 absolute_status = firmware_read_absolute_pointer(&absolute_state);
                 absolute_ready = absolute_status == ASTRA_INPUT_EFI_SUCCESS &&
                     mode != NULL;
+#if defined(__aarch64__)
+                if (g_input_debug_pointer_polls < 8u) {
+                    g_input_debug_pointer_polls++;
+                    astra_uart_puts("desktop: UEFI Absolute Pointer GetState=");
+                    astra_uart_put_u32((uint32_t)absolute_status);
+                    astra_uart_puts("\n");
+                }
+#endif
                 if (absolute_status != ASTRA_INPUT_EFI_NOT_READY &&
                     absolute_status != ASTRA_INPUT_EFI_SUCCESS &&
                     absolute_status != ASTRA_INPUT_EFI_UNSUPPORTED) {
@@ -433,6 +451,18 @@ bool astra_input_read_event(AstraInputEvent *event_out) {
             }
 
             status = firmware_wait_for_events(events, event_count, &event_index);
+#if defined(__aarch64__)
+            if (g_input_debug_waits < 12u) {
+                g_input_debug_waits++;
+                astra_uart_puts("desktop: UEFI WaitForEvent index=");
+                astra_uart_put_u32((uint32_t)event_index);
+                astra_uart_puts(" status=");
+                astra_uart_put_u32((uint32_t)status);
+                astra_uart_puts(" count=");
+                astra_uart_put_u32((uint32_t)event_count);
+                astra_uart_puts("\n");
+            }
+#endif
             if (status != ASTRA_INPUT_EFI_SUCCESS || event_index >= event_count) {
                 return false;
             }
