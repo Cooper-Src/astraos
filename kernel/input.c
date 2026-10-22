@@ -13,7 +13,7 @@ enum {
     ASTRA_INPUT_ASCII_MAX = 0x7f,
     ASTRA_INPUT_DAIF_IRQ_MASK_BIT = 7u,
     ASTRA_INPUT_VBAR_ALIGNMENT_MASK = 0x7ffu,
-    ASTRA_INPUT_MAX_WAIT_EVENTS = 3u
+    ASTRA_INPUT_MAX_WAIT_EVENTS = 4u
 };
 
 typedef struct AstraFirmwareCallState {
@@ -26,6 +26,7 @@ static AstraFirmwareTextInputProtocol *g_firmware_input = NULL;
 static AstraFirmwareSimplePointerProtocol *g_simple_pointer = NULL;
 static AstraFirmwareAbsolutePointerProtocol *g_absolute_pointer = NULL;
 static AstraFirmwareWaitForEvent g_wait_for_event = NULL;
+static void *g_firmware_poll_event = NULL;
 static uint64_t g_firmware_exception_level = 0u;
 static uint64_t g_firmware_exception_vector = 0u;
 static uint64_t g_firmware_daif = 0u;
@@ -227,6 +228,7 @@ bool astra_input_initialize(const AstraBootInfo *boot_info, bool serial_ready) {
     g_simple_pointer = NULL;
     g_absolute_pointer = NULL;
     g_wait_for_event = NULL;
+    g_firmware_poll_event = NULL;
     g_firmware_exception_level = 0u;
     g_firmware_exception_vector = 0u;
     g_firmware_daif = 0u;
@@ -248,6 +250,7 @@ bool astra_input_initialize(const AstraBootInfo *boot_info, bool serial_ready) {
 #if defined(__aarch64__)
         g_firmware_input = boot_info->firmware_input_protocol;
         g_wait_for_event = boot_info->firmware_wait_for_event;
+        g_firmware_poll_event = boot_info->firmware_pointer_poll_event;
         g_firmware_exception_level = boot_info->firmware_exception_level;
         g_firmware_exception_vector = boot_info->firmware_exception_vector;
         g_firmware_daif = boot_info->firmware_daif &
@@ -305,10 +308,8 @@ bool astra_input_read_event(AstraInputEvent *event_out) {
     event_out->right_button_down = false;
 
     if (g_use_serial_input) {
-        uint8_t key = 0u;
-        key = astra_uart_get_byte();
+        event_out->key = astra_uart_get_byte();
         event_out->kind = ASTRA_INPUT_EVENT_KEY;
-        event_out->key = key;
         return true;
     }
     if (g_firmware_input == NULL || g_wait_for_event == NULL) {
@@ -316,103 +317,109 @@ bool astra_input_read_event(AstraInputEvent *event_out) {
     }
 
     for (;;) {
-        void *events[ASTRA_INPUT_MAX_WAIT_EVENTS];
-        uint64_t event_count = 1u;
-        uint64_t event_index = UINT64_MAX;
+        AstraFirmwareInputKey key;
+        AstraFirmwareSimplePointerState simple_state;
+        AstraFirmwareAbsolutePointerState absolute_state;
         uint64_t status = ASTRA_INPUT_EFI_UNSUPPORTED;
-        const uint64_t key_index = 0u;
-        uint64_t simple_index = UINT64_MAX;
-        uint64_t absolute_index = UINT64_MAX;
 
-        events[0] = g_firmware_input->wait_for_key;
-        if (g_simple_pointer != NULL) {
-            simple_index = event_count;
-            events[(size_t)event_count] = g_simple_pointer->wait_for_input;
-            event_count++;
-        }
-        if (g_absolute_pointer != NULL) {
-            absolute_index = event_count;
-            events[(size_t)event_count] = g_absolute_pointer->wait_for_input;
-            event_count++;
-        }
-        status = firmware_wait_for_events(events, event_count, &event_index);
-        if (status != ASTRA_INPUT_EFI_SUCCESS || event_index >= event_count) {
+        key.scan_code = 0u;
+        key.unicode_char = 0u;
+        status = firmware_read_key(&key);
+        if (status == ASTRA_INPUT_EFI_SUCCESS) {
+            uint8_t translated = 0u;
+            if (astra_input_translate_key(key.unicode_char, &translated)) {
+                event_out->kind = ASTRA_INPUT_EVENT_KEY;
+                event_out->key = translated;
+                return true;
+            }
+        } else if (status != ASTRA_INPUT_EFI_NOT_READY &&
+            status != ASTRA_INPUT_EFI_UNSUPPORTED) {
             return false;
         }
 
-        if (event_index == key_index) {
-            AstraFirmwareInputKey key;
-            uint8_t translated = 0u;
-            uint64_t key_status = ASTRA_INPUT_EFI_UNSUPPORTED;
-            key.scan_code = 0u;
-            key.unicode_char = 0u;
-            key_status = firmware_read_key(&key);
-            if (key_status == ASTRA_INPUT_EFI_NOT_READY) {
-                continue;
+        /*
+         * Poll all available pointer protocols after every firmware event.
+         * Some firmware implementations don't signal WaitForInput consistently;
+         * the loader's periodic timer provides a bounded polling opportunity.
+         */
+        if (g_absolute_pointer != NULL) {
+            const AstraFirmwareAbsolutePointerMode *mode = g_absolute_pointer->mode;
+            absolute_state.current_x = 0u;
+            absolute_state.current_y = 0u;
+            absolute_state.current_z = 0u;
+            absolute_state.active_buttons = 0u;
+            status = firmware_read_absolute_pointer(&absolute_state);
+            if (status == ASTRA_INPUT_EFI_SUCCESS && mode != NULL) {
+                event_out->kind = ASTRA_INPUT_EVENT_POINTER;
+                event_out->absolute = true;
+                event_out->absolute_x = absolute_state.current_x;
+                event_out->absolute_y = absolute_state.current_y;
+                event_out->min_x = mode->min_x;
+                event_out->max_x = mode->max_x;
+                event_out->min_y = mode->min_y;
+                event_out->max_y = mode->max_y;
+                event_out->left_button_down =
+                    (absolute_state.active_buttons & UINT32_C(1)) != 0u;
+                event_out->right_button_down =
+                    (absolute_state.active_buttons & UINT32_C(2)) != 0u;
+                return true;
             }
-            if (key_status != ASTRA_INPUT_EFI_SUCCESS) {
+            if (status != ASTRA_INPUT_EFI_NOT_READY &&
+                status != ASTRA_INPUT_EFI_UNSUPPORTED) {
+                g_absolute_pointer = NULL;
+            }
+        }
+
+        if (g_simple_pointer != NULL) {
+            simple_state.relative_x = 0;
+            simple_state.relative_y = 0;
+            simple_state.relative_z = 0;
+            simple_state.left_button = 0u;
+            simple_state.right_button = 0u;
+            status = firmware_read_simple_pointer(&simple_state);
+            if (status == ASTRA_INPUT_EFI_SUCCESS) {
+                event_out->kind = ASTRA_INPUT_EVENT_POINTER;
+                event_out->delta_x = simple_state.relative_x;
+                event_out->delta_y = simple_state.relative_y;
+                event_out->left_button_down = simple_state.left_button != 0u;
+                event_out->right_button_down = simple_state.right_button != 0u;
+                return true;
+            }
+            if (status != ASTRA_INPUT_EFI_NOT_READY &&
+                status != ASTRA_INPUT_EFI_UNSUPPORTED) {
+                g_simple_pointer = NULL;
+            }
+        }
+
+        {
+            void *events[ASTRA_INPUT_MAX_WAIT_EVENTS] = {NULL, NULL, NULL, NULL};
+            uint64_t event_count = 0u;
+            uint64_t event_index = UINT64_MAX;
+
+            events[event_count] = g_firmware_input->wait_for_key;
+            event_count++;
+            if (g_simple_pointer != NULL) {
+                events[event_count] = g_simple_pointer->wait_for_input;
+                event_count++;
+            }
+            if (g_absolute_pointer != NULL) {
+                events[event_count] = g_absolute_pointer->wait_for_input;
+                event_count++;
+            }
+            if (g_firmware_poll_event != NULL) {
+                events[event_count] = g_firmware_poll_event;
+                event_count++;
+            }
+
+            status = firmware_wait_for_events(events, event_count, &event_index);
+            if (status != ASTRA_INPUT_EFI_SUCCESS || event_index >= event_count) {
                 return false;
             }
-            if (!astra_input_translate_key(key.unicode_char, &translated)) {
-                continue;
-            }
-            event_out->kind = ASTRA_INPUT_EVENT_KEY;
-            event_out->key = translated;
-            return true;
-        }
-
-        if (event_index == simple_index && g_simple_pointer != NULL) {
-            AstraFirmwareSimplePointerState state;
-            state.relative_x = 0;
-            state.relative_y = 0;
-            state.relative_z = 0;
-            state.left_button = 0u;
-            state.right_button = 0u;
-            status = firmware_read_simple_pointer(&state);
-            if (status == ASTRA_INPUT_EFI_NOT_READY) {
-                continue;
-            }
-            if (status != ASTRA_INPUT_EFI_SUCCESS) {
-                g_simple_pointer = NULL;
-                continue;
-            }
-            event_out->kind = ASTRA_INPUT_EVENT_POINTER;
-            event_out->delta_x = state.relative_x;
-            event_out->delta_y = state.relative_y;
-            event_out->left_button_down = state.left_button != 0u;
-            event_out->right_button_down = state.right_button != 0u;
-            return true;
-        }
-
-        if (event_index == absolute_index && g_absolute_pointer != NULL) {
-            AstraFirmwareAbsolutePointerState state;
-            const AstraFirmwareAbsolutePointerMode *mode =
-                g_absolute_pointer->mode;
-            state.current_x = 0u;
-            state.current_y = 0u;
-            state.current_z = 0u;
-            state.active_buttons = 0u;
-            status = firmware_read_absolute_pointer(&state);
-            if (status == ASTRA_INPUT_EFI_NOT_READY) {
-                continue;
-            }
-            if (status != ASTRA_INPUT_EFI_SUCCESS || mode == NULL ||
-                mode->max_x <= mode->min_x || mode->max_y <= mode->min_y ||
-                mode->max_x > UINT64_C(1000000) || mode->max_y > UINT64_C(1000000)) {
-                g_absolute_pointer = NULL;
-                continue;
-            }
-            event_out->kind = ASTRA_INPUT_EVENT_POINTER;
-            event_out->absolute = true;
-            event_out->absolute_x = state.current_x;
-            event_out->absolute_y = state.current_y;
-            event_out->min_x = mode->min_x;
-            event_out->max_x = mode->max_x;
-            event_out->min_y = mode->min_y;
-            event_out->max_y = mode->max_y;
-            event_out->left_button_down = (state.active_buttons & 1u) != 0u;
-            event_out->right_button_down = (state.active_buttons & 2u) != 0u;
-            return true;
+            /*
+             * Deliberately don't branch on event_index: a pointer may already
+             * have state pending when a key/timer wakes the wait, so poll all
+             * devices at the top of the next iteration.
+             */
         }
     }
 }
