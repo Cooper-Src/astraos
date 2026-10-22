@@ -32,6 +32,9 @@ static uint64_t g_firmware_exception_vector = 0u;
 static uint64_t g_firmware_daif = 0u;
 
 #if defined(__aarch64__)
+static uint32_t g_input_debug_waits = 0u;
+static uint32_t g_input_debug_pointer_polls = 0u;
+
 /* Firmware services need their original vector table and an unmasked IRQ path. */
 static bool firmware_context_enter(AstraFirmwareCallState *state) {
     uint64_t kernel_vector = 0u;
