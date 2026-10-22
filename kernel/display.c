@@ -26,7 +26,8 @@ enum {
     DISPLAY_TERMINAL_TEXT_CAP = 54u,
     DISPLAY_FILE_ROWS = 8u,
     DISPLAY_VIEWER_ROWS = 12u,
-    DISPLAY_TEXT_CELL_WIDTH = 8u
+    DISPLAY_TEXT_CELL_WIDTH = 8u,
+    DISPLAY_DOUBLE_CLICK_EVENT_LIMIT = 8u
 };
 
 #define COLOR_DESKTOP          UINT32_C(0x101b2c)
@@ -95,6 +96,9 @@ static uint32_t g_mouse_x;
 static uint32_t g_mouse_y;
 static bool g_mouse_left_down;
 static int g_drag_surface_index = -1;
+static uint32_t g_input_event_counter;
+static uint32_t g_files_last_click_event;
+static size_t g_files_last_click_index = SIZE_MAX;
 
 static size_t string_length(const char *text) {
     size_t length = 0u;
@@ -459,7 +463,7 @@ static void render_panel(void) {
     astra_framebuffer_fill_rect(15u, 12u, 17u, 17u, COLOR_PANEL);
     draw_text(20u, 17u, "A", COLOR_ACCENT);
     astra_framebuffer_fill_rect(43u, 5u, 100u, 32u, COLOR_PANEL_HOVER);
-    draw_text(52u, 17u, "Applications", COLOR_TEXT);
+    draw_text(65u, 17u, "Start", COLOR_TEXT);
 
     for (size_t index = 0u; index < DISPLAY_SURFACE_CAP; index++) {
         const AstraDisplaySurface *surface = &g_surfaces[index];
@@ -903,6 +907,7 @@ static void files_open_selected(void) {
         string_copy(g_files_path, sizeof g_files_path, target);
         g_files_selection = 0u;
         g_files_scroll = 0u;
+        g_files_last_click_index = SIZE_MAX;
         astra_uart_puts("desktop: files directory opened\n");
         return;
     }
@@ -921,6 +926,7 @@ static void files_open_selected(void) {
     g_viewer_content[g_viewer_content_length] = '\0';
     string_copy(g_viewer_path, sizeof g_viewer_path, target);
     g_viewer_scroll = 0u;
+    g_files_last_click_index = SIZE_MAX;
     open_surface(DISPLAY_APP_VIEWER);
     astra_uart_puts("desktop: text viewer opened\n");
 }
@@ -1283,7 +1289,7 @@ static void render_applications_menu(void) {
     astra_framebuffer_fill_rect(x + 4u, y + 4u, width, height, COLOR_PANEL);
     astra_framebuffer_fill_rect(x, y, width, height, COLOR_WINDOW_EDGE);
     astra_framebuffer_fill_rect(x + 2u, y + 2u, width - 4u, height - 4u, COLOR_PANEL);
-    draw_text(x + 12u, y + 12u, "AstraOS Applications", COLOR_ACCENT);
+    draw_text(x + 12u, y + 12u, "AstraOS Start menu", COLOR_ACCENT);
     astra_framebuffer_fill_rect(x + 8u, y + 31u, width - 16u, 1u, COLOR_PANEL_EDGE);
     draw_text(x + 14u, y + 43u, "T  Terminal", COLOR_TEXT);
     draw_text(x + 14u, y + 67u, "F  File Manager", COLOR_TEXT);
@@ -1491,6 +1497,54 @@ static bool handle_menu_pointer_press(uint32_t x, uint32_t y, bool *handled_out)
     return false;
 }
 
+
+static void handle_files_pointer_press(
+    const AstraDisplaySurface *surface,
+    uint32_t x,
+    uint32_t y
+) {
+    AstraVfsEntry entries[ASTRA_VFS_MAX_NODES];
+    size_t count = 0u;
+    size_t row = 0u;
+    size_t selected_index = 0u;
+    uint32_t first_row_y = 0u;
+    const uint32_t content_left = surface->x + 13u;
+    const uint32_t content_right = surface->x + surface->width - 13u;
+
+    if (surface == NULL || x < content_left || x >= content_right) {
+        return;
+    }
+    first_row_y = surface->y + DISPLAY_TITLEBAR_HEIGHT + 18u + 23u;
+    if (y < first_row_y) {
+        return;
+    }
+    row = (size_t)((y - first_row_y) / 18u);
+    if (row >= (size_t)DISPLAY_FILE_ROWS) {
+        return;
+    }
+    if (!files_list(entries, &count) || count == 0u) {
+        return;
+    }
+    selected_index = g_files_scroll + row;
+    if (selected_index >= count) {
+        return;
+    }
+
+    if (selected_index == g_files_last_click_index &&
+        (uint32_t)(g_input_event_counter - g_files_last_click_event) <=
+            (uint32_t)DISPLAY_DOUBLE_CLICK_EVENT_LIMIT) {
+        g_files_selection = selected_index;
+        g_files_last_click_index = SIZE_MAX;
+        files_open_selected();
+        return;
+    }
+
+    g_files_selection = selected_index;
+    g_files_last_click_index = selected_index;
+    g_files_last_click_event = g_input_event_counter;
+    astra_uart_puts("desktop: file entry selected by pointer\n");
+}
+
 static bool handle_mouse_press(uint32_t x, uint32_t y) {
     AstraDisplaySurface *surface = NULL;
     bool menu_handled = false;
@@ -1551,6 +1605,10 @@ static bool handle_mouse_press(uint32_t x, uint32_t y) {
             } else if (index < DISPLAY_SURFACE_CAP) {
                 g_drag_surface_index = (int)index;
             }
+        } else if (surface->app == DISPLAY_APP_FILES) {
+            handle_files_pointer_press(surface, x, y);
+        } else if (surface->app == DISPLAY_APP_VIEWER) {
+            astra_uart_puts("desktop: text viewer focused by pointer\n");
         }
         return false;
     }
@@ -1713,6 +1771,9 @@ bool astra_display_server_run(void) {
     g_mouse_y = g_screen_height / 2u;
     g_mouse_left_down = false;
     g_drag_surface_index = -1;
+    g_input_event_counter = 0u;
+    g_files_last_click_event = 0u;
+    g_files_last_click_index = SIZE_MAX;
 
     astra_framebuffer_set_console_enabled(false);
     open_surface(DISPLAY_APP_WELCOME);
@@ -1732,6 +1793,13 @@ bool astra_display_server_run(void) {
             astra_uart_puts("Display server input failed; returning to the shell.\n");
             stop_display_server();
             return false;
+        }
+        if (g_input_event_counter == UINT32_MAX) {
+            g_input_event_counter = 0u;
+            g_files_last_click_index = SIZE_MAX;
+            g_files_last_click_event = 0u;
+        } else {
+            g_input_event_counter++;
         }
         if (event.kind == ASTRA_INPUT_EVENT_POINTER) {
             if (handle_pointer_event(&event)) {
