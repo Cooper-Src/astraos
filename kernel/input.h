@@ -39,6 +39,14 @@ bool astra_input_read_byte(uint8_t *byte_out);
 /* True when UEFI exposed at least one usable relative or absolute pointer. */
 bool astra_input_pointer_available(void);
 
+/*
+ * Desktop-only UEFI compatibility mode keeps firmware IRQ dispatch active so
+ * firmware USB HID drivers can complete asynchronous pointer reports. Disabling
+ * it restores the kernel's original exception vector and DAIF state.
+ */
+bool astra_input_enable_desktop_firmware_context(void);
+void astra_input_disable_desktop_firmware_context(void);
+
 /* Converts a UEFI Unicode key to the shell's ASCII input stream. */
 bool astra_input_translate_key(uint16_t unicode_char, uint8_t *byte_out);
 
