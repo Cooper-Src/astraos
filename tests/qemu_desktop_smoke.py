@@ -146,6 +146,12 @@ def type_command(client: QMPClient, command: str) -> None:
             key = character.lower()
         elif character.isdigit():
             key = character
+        elif character == "/":
+            key = "slash"
+        elif character == ".":
+            key = "dot"
+        elif character == "-":
+            key = "minus"
         else:
             raise ValueError(f"unsupported test-key character: {character!r}")
         client.send_key(key)
@@ -273,10 +279,14 @@ def main(argv: list[str]) -> int:
         wait_for_log(log_path, "desktop: terminal command pwd", EVENT_TIMEOUT)
         type_command(client, "ls")
         wait_for_log(log_path, "desktop: terminal command ls", EVENT_TIMEOUT)
+        type_command(client, "touch mouse.txt")
+        wait_for_log(log_path, "desktop: terminal filesystem create", EVENT_TIMEOUT)
+        type_command(client, "write mouse.txt pointer-ok")
+        wait_for_log(log_path, "desktop: terminal command write", EVENT_TIMEOUT)
         type_command(client, "exit")
         wait_for_log(log_path, "desktop: terminal window closed", EVENT_TIMEOUT)
 
-        # Open Files through the start menu; verify taskbar minimisation and restoration.
+        # Files sees the file Terminal just wrote; click the row twice to open it.
         client.click(75, 20, width, height)
         wait_for_log(log_path, "desktop: applications menu opened", EVENT_TIMEOUT)
         client.click(65, 47 + 70, width, height)
@@ -290,14 +300,20 @@ def main(argv: list[str]) -> int:
             file_x = width - file_width - 8
         if file_y > height - 54 - file_height - 8:
             file_y = height - 54 - file_height - 8
+        first_row_y = file_y + 30 + 18 + 23
+        mouse_file_row_y = first_row_y + 4 * 18 + 9
+        client.click(file_x + 100, mouse_file_row_y, width, height)
+        wait_for_log(log_path, "desktop: file entry selected by pointer", EVENT_TIMEOUT)
+        client.click(file_x + 100, mouse_file_row_y, width, height)
+        wait_for_log(log_path, "desktop: text viewer opened: mouse.txt", EVENT_TIMEOUT)
+        client.send_key("b")
+        wait_for_log(log_path, "desktop: text viewer closed", EVENT_TIMEOUT)
 
-        # The minimize control is the amber title-bar button.
+        # The taskbar can minimise, restore, and close the File Manager.
         client.click(file_x + file_width - 63, file_y + 16, width, height)
         wait_for_log(log_path, "desktop: window minimized", EVENT_TIMEOUT)
-        client.click(270, 20, width, height)
+        client.click(280, 20, width, height)
         wait_for_log(log_path, "desktop: taskbar window focused", EVENT_TIMEOUT)
-
-        # Close Files by clicking its red title-bar button.
         client.click(file_x + file_width - 15, file_y + 16, width, height)
         wait_for_log(log_path, "desktop: window closed", EVENT_TIMEOUT)
         client.send_key("q")
