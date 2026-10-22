@@ -378,7 +378,7 @@ def main(argv: list[str]) -> int:
         wait_for_log(log_path, "desktop: terminal command ls", EVENT_TIMEOUT)
         type_command(client, "touch mouse.txt")
         wait_for_log(log_path, "desktop: terminal filesystem create", EVENT_TIMEOUT)
-        type_command(client, "write mouse.txt pointer-ok")
+        type_command(client, "write mouse.txt pointerok")
         wait_for_log(log_path, "desktop: terminal command write", EVENT_TIMEOUT)
         type_command(client, "exit")
         wait_for_log(log_path, "desktop: terminal window closed", EVENT_TIMEOUT)
