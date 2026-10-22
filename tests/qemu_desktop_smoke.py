@@ -195,6 +195,7 @@ def wait_for_log(path: Path, needle: str, timeout: float) -> str:
 
 
 def type_command(client: QMPClient, command: str) -> None:
+    punctuation = {".": "dot", "/": "slash", "-": "minus"}
     for character in command:
         if character == " ":
             key = "spc"
@@ -202,6 +203,8 @@ def type_command(client: QMPClient, command: str) -> None:
             key = character.lower()
         elif character.isdigit():
             key = character
+        elif character in punctuation:
+            key = punctuation[character]
         else:
             raise ValueError(f"unsupported test-key character: {character!r}")
         client.send_key(key)
@@ -242,11 +245,10 @@ def main(argv: list[str]) -> int:
             f"with {sampled_colors} sampled colours."
         )
 
-        wait_for_log(log_path, "desktop: pointer event received", EVENT_TIMEOUT)
-
         # QMP absolute input is delivered to the emulated USB tablet and translated
-        # by UEFI into absolute coordinates; this is different from host-window motion.
+        # by UEFI into absolute coordinates; the first movement produces the initial event.
         client.move_mouse_to(80, 20, screenshot_width, screenshot_height)
+        wait_for_log(log_path, "desktop: pointer event received", EVENT_TIMEOUT)
         client.click_mouse()
         wait_for_log(log_path, "desktop: applications menu opened by pointer", EVENT_TIMEOUT)
         client.move_mouse_to(32, 95, screenshot_width, screenshot_height)
