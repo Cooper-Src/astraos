@@ -30,6 +30,9 @@ static void *g_firmware_poll_event = NULL;
 static uint64_t g_firmware_exception_level = 0u;
 static uint64_t g_firmware_exception_vector = 0u;
 static uint64_t g_firmware_daif = 0u;
+#if defined(__aarch64__)
+static uint32_t g_pointer_probe_count = 0u;
+#endif
 
 #if defined(__aarch64__)
 
@@ -233,6 +236,9 @@ bool astra_input_initialize(const AstraBootInfo *boot_info, bool serial_ready) {
     g_firmware_exception_level = 0u;
     g_firmware_exception_vector = 0u;
     g_firmware_daif = 0u;
+#if defined(__aarch64__)
+    g_pointer_probe_count = 0u;
+#endif
 
     if (boot_info != NULL &&
         boot_info->magic == ASTRA_BOOT_INFO_MAGIC &&
@@ -384,6 +390,28 @@ bool astra_input_read_event(AstraInputEvent *event_out) {
                     absolute_ready = false;
                 }
             }
+
+#if defined(__aarch64__)
+            /*
+             * Bounded diagnostics: distinguish missing hardware reports from
+             * a failing firmware call without flooding the serial console.
+             */
+            if (g_pointer_probe_count < UINT32_C(1000)) {
+                g_pointer_probe_count++;
+                if (g_pointer_probe_count == 1u ||
+                    (g_pointer_probe_count % UINT32_C(50)) == 0u) {
+                    astra_uart_puts("input: pointer poll simple_status=");
+                    astra_uart_put_hex(simple_status);
+                    astra_uart_puts(" absolute_status=");
+                    astra_uart_put_hex(absolute_status);
+                    astra_uart_puts(" simple_ready=");
+                    astra_uart_put_u32(simple_ready ? 1u : 0u);
+                    astra_uart_puts(" absolute_ready=");
+                    astra_uart_put_u32(absolute_ready ? 1u : 0u);
+                    astra_uart_puts("\n");
+                }
+            }
+#endif
 
             if (absolute_ready) {
                 event_out->kind = ASTRA_INPUT_EVENT_POINTER;
