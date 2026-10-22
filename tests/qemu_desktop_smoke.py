@@ -179,11 +179,9 @@ def move_mouse_to(
 ) -> tuple[int, int]:
     if target_x < 0 or target_x >= screen_width or target_y < 0 or target_y >= screen_height:
         raise ValueError("mouse target falls outside the guest framebuffer")
-    _window_id, origin_x, origin_y = window
-    root_x = origin_x + target_x
-    root_y = origin_y + target_y
+    window_id, _origin_x, _origin_y = window
     subprocess.run(
-        ["xdotool", "mousemove", str(root_x), str(root_y)],
+        ["xdotool", "mousemove", "--window", window_id, str(target_x), str(target_y)],
         check=True,
         capture_output=True,
         text=True,
@@ -196,22 +194,14 @@ def move_mouse_to(
             capture_output=True,
             text=True,
         )
-        print(f"Host pointer after movement: {location.stdout.strip()}")
+        print(f"Host pointer after window-relative movement: {location.stdout.strip()}")
     return target_x, target_y
 
 
 def click_mouse(window: tuple[str, int, int], x: int, y: int) -> None:
-    _window_id, origin_x, origin_y = window
-    root_x = origin_x + x
-    root_y = origin_y + y
+    window_id, _origin_x, _origin_y = window
     subprocess.run(
-        ["xdotool", "mousemove", str(root_x), str(root_y)],
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-    subprocess.run(
-        ["xdotool", "click", "1"],
+        ["xdotool", "mousemove", "--window", window_id, str(x), str(y), "click", "1"],
         check=True,
         capture_output=True,
         text=True,
