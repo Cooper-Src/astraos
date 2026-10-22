@@ -24,6 +24,8 @@ class QMPClient:
         self._socket = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         self._buffer = bytearray()
         self._next_id = 1
+        self._pointer_x: int | None = None
+        self._pointer_y: int | None = None
         try:
             self._socket.settimeout(CONNECT_TIMEOUT)
             self._socket.connect(socket_path)
@@ -83,32 +85,63 @@ class QMPClient:
         self.execute("human-monitor-command", {"command-line": f"sendkey {key}"})
 
     def select_mouse_device(self) -> str:
-        """Choose QEMU's relative mouse input device for HMP mouse commands."""
+        """Select a non-absolute mouse when QEMU reports one."""
         mice = self.execute("query-mice")
         if not isinstance(mice, list) or not mice:
             raise RuntimeError(f"QEMU reports no guest mouse devices: {mice!r}")
-        candidates = [mouse for mouse in mice if isinstance(mouse, dict) and not mouse.get("absolute", False)]
+        candidates = [
+            mouse for mouse in mice
+            if isinstance(mouse, dict) and not mouse.get("absolute", False)
+        ]
         selected = candidates[0] if candidates else mice[0]
         if not isinstance(selected, dict) or not isinstance(selected.get("index"), int):
             raise RuntimeError(f"QEMU returned malformed mouse information: {mice!r}")
-        index = selected["index"]
-        self.execute("human-monitor-command", {"command-line": f"mouse_set {index}"})
-        return str(selected.get("name", f"mouse #{index}"))
+        self.execute(
+            "human-monitor-command",
+            {"command-line": f"mouse_set {selected['index']}"},
+        )
+        return str(selected.get("name", f"mouse #{selected['index']}"))
 
     def pointer_position(self, x: int, y: int, width: int, height: int) -> None:
-        """Move the active QEMU mouse through its HMP guest-input path."""
+        """Move the active relative mouse in small deltas through QEMU's HMP queue."""
         if width < 2 or height < 2:
             raise ValueError("framebuffer dimensions are too small for pointer injection")
         target_x = max(0, min(x, width - 1))
         target_y = max(0, min(y, height - 1))
-        self.execute(
-            "human-monitor-command",
-            {"command-line": f"mouse_move {target_x} {target_y}"},
+        if self._pointer_x is None or self._pointer_y is None:
+            # The AstraOS software cursor begins at the centre of the framebuffer.
+            self._pointer_x = width // 2
+            self._pointer_y = height // 2
+
+        # HMP mouse_move injects REL deltas. AstraOS currently scales each by two pixels.
+        remaining_x = (target_x - self._pointer_x) // 2
+        remaining_y = (target_y - self._pointer_y) // 2
+        step_limit = 48
+        moved_x = 0
+        moved_y = 0
+        while remaining_x != 0 or remaining_y != 0:
+            step_x = max(-step_limit, min(step_limit, remaining_x))
+            step_y = max(-step_limit, min(step_limit, remaining_y))
+            self.execute(
+                "human-monitor-command",
+                {"command-line": f"mouse_move {step_x} {step_y}"},
+            )
+            moved_x += step_x
+            moved_y += step_y
+            remaining_x -= step_x
+            remaining_y -= step_y
+            # Give the USB HID report and firmware polling timer time to run.
+            time.sleep(0.04)
+
+        self._pointer_x = max(
+            0, min(self._pointer_x + moved_x * 2, width - 1)
         )
-        time.sleep(0.2)
+        self._pointer_y = max(
+            0, min(self._pointer_y + moved_y * 2, height - 1)
+        )
 
     def mouse_button(self, down: bool) -> None:
-        # HMP mouse_button takes a complete button-state bitmask (1=left, 0=released).
+        # QEMU HMP's mouse_button argument is the full state bitmask: 1=left, 0=up.
         state = 1 if down else 0
         self.execute(
             "human-monitor-command",
@@ -122,6 +155,7 @@ class QMPClient:
         time.sleep(0.15)
         self.mouse_button(False)
         time.sleep(0.15)
+
 
     def screenshot(self, path: Path) -> tuple[int, int, Counter[tuple[int, int, int]]]:
         self.execute("human-monitor-command", {"command-line": f"screendump {path}"})
