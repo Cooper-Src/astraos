@@ -139,14 +139,14 @@ jobs:
             exit 1
           fi
           cp "$VARS_TEMPLATE" build/uefi-desktop-vars.fd
-          rm -f build/qmp-desktop.sock build/qemu-desktop-serial.log build/qemu-desktop-launch.log
+          rm -f build/qmp-desktop.sock build/qemu-desktop-serial.log build/qemu-desktop-launch.log build/desktop-screen.ppm
           qemu-system-aarch64 \
             -machine virt -cpu cortex-a72 -m 1024 \
-            -device ramfb -device qemu-xhci -device usb-kbd \
+            -device ramfb -device qemu-xhci -device usb-kbd -device usb-mouse \
             -drive if=pflash,unit=0,format=raw,readonly=on,file="$CODE" \
             -drive if=pflash,unit=1,format=raw,file=build/uefi-desktop-vars.fd \
             -cdrom build/astraos-aarch64-desktop.iso -boot order=d \
-            -display none -serial file:build/qemu-desktop-serial.log -monitor none \
+            -display vnc=127.0.0.1:1 -serial file:build/qemu-desktop-serial.log -monitor none \
             -qmp unix:build/qmp-desktop.sock,server=on,wait=off \
             > build/qemu-desktop-launch.log 2>&1 &
           QEMU_PID=$!
@@ -155,7 +155,7 @@ jobs:
             wait "$QEMU_PID" 2>/dev/null || true
           }
           trap cleanup EXIT
-          python3 tests/qemu_desktop_smoke.py build/qmp-desktop.sock build/qemu-desktop-serial.log
+          python3 tests/qemu_desktop_smoke.py build/qmp-desktop.sock build/qemu-desktop-serial.log build/desktop-screen.ppm
           cleanup
           trap - EXIT
           cat build/qemu-desktop-launch.log
@@ -183,6 +183,7 @@ jobs:
             build/qemu-keyboard-launch.log
             build/qemu-desktop-serial.log
             build/qemu-desktop-launch.log
+            build/desktop-screen.ppm
           if-no-files-found: error
           retention-days: 30
 

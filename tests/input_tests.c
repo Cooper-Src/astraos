@@ -11,6 +11,15 @@ uint8_t astra_uart_get_byte(void) {
     return g_serial_byte;
 }
 
+/* The host unit test does not provide a real serial console. */
+void astra_uart_puts(const char *text) {
+    (void)text;
+}
+
+void astra_uart_put_hex(uint64_t value) {
+    (void)value;
+}
+
 #define CHECK(condition) \
     do { \
         if (!(condition)) { \
@@ -45,10 +54,16 @@ static void test_ascii_key_translation(void) {
 
 static void test_serial_input_fallback(void) {
     uint8_t byte = 0u;
+    AstraInputEvent event = {0};
 
     CHECK(astra_input_initialize(NULL, true));
+    CHECK(!astra_input_pointer_available());
     CHECK(astra_input_read_byte(&byte));
     CHECK(byte == g_serial_byte);
+    CHECK(astra_input_read_event(&event));
+    CHECK(event.type == ASTRA_INPUT_EVENT_KEY);
+    CHECK(event.key == g_serial_byte);
+    CHECK(!event.absolute_position);
 
     CHECK(!astra_input_initialize(NULL, false));
     byte = UINT8_C(0xaa);

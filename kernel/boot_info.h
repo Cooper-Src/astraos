@@ -4,17 +4,86 @@
 #include <stdint.h>
 
 #define ASTRA_BOOT_INFO_MAGIC UINT64_C(0x4153545241424f4f)
-#define ASTRA_BOOT_INFO_VERSION UINT64_C(5)
+#define ASTRA_BOOT_INFO_VERSION UINT64_C(7)
 #define ASTRA_BOOT_MEMORY_MAP_CAP_BYTES (UINT64_C(16384) * UINT64_C(8))
 
 #define ASTRA_BOOT_FLAG_BOOT_SERVICES_ACTIVE (UINT64_C(1) << 0u)
 #define ASTRA_BOOT_FLAG_UEFI_TEXT_INPUT (UINT64_C(1) << 1u)
 #define ASTRA_BOOT_FLAG_DESKTOP_MODE (UINT64_C(1) << 2u)
+#define ASTRA_BOOT_FLAG_UEFI_POINTER_INPUT (UINT64_C(1) << 3u)
+#define ASTRA_BOOT_FLAG_UEFI_ABSOLUTE_POINTER_INPUT (UINT64_C(1) << 4u)
 
 typedef struct AstraFirmwareInputKey {
     uint16_t scan_code;
     uint16_t unicode_char;
 } AstraFirmwareInputKey;
+
+typedef struct AstraFirmwareSimplePointerProtocol AstraFirmwareSimplePointerProtocol;
+typedef struct AstraFirmwareAbsolutePointerProtocol AstraFirmwareAbsolutePointerProtocol;
+
+typedef struct AstraFirmwarePointerState {
+    int32_t relative_movement_x;
+    int32_t relative_movement_y;
+    int32_t relative_movement_z;
+    uint8_t left_button;
+    uint8_t right_button;
+} AstraFirmwarePointerState;
+
+typedef struct AstraFirmwarePointerMode {
+    uint64_t resolution_x;
+    uint64_t resolution_y;
+    uint64_t resolution_z;
+    uint8_t left_button;
+    uint8_t right_button;
+} AstraFirmwarePointerMode;
+
+typedef struct AstraFirmwareAbsolutePointerState {
+    uint64_t current_x;
+    uint64_t current_y;
+    uint64_t current_z;
+    uint32_t active_buttons;
+} AstraFirmwareAbsolutePointerState;
+
+typedef struct AstraFirmwareAbsolutePointerMode {
+    uint64_t absolute_min_x;
+    uint64_t absolute_min_y;
+    uint64_t absolute_min_z;
+    uint64_t absolute_max_x;
+    uint64_t absolute_max_y;
+    uint64_t absolute_max_z;
+    uint32_t attributes;
+} AstraFirmwareAbsolutePointerMode;
+
+typedef uint64_t (*AstraFirmwarePointerReset)(
+    AstraFirmwareSimplePointerProtocol *protocol,
+    uint8_t extended_verification
+);
+typedef uint64_t (*AstraFirmwarePointerGetState)(
+    AstraFirmwareSimplePointerProtocol *protocol,
+    AstraFirmwarePointerState *state_out
+);
+typedef uint64_t (*AstraFirmwareAbsolutePointerReset)(
+    AstraFirmwareAbsolutePointerProtocol *protocol,
+    uint8_t extended_verification
+);
+typedef uint64_t (*AstraFirmwareAbsolutePointerGetState)(
+    AstraFirmwareAbsolutePointerProtocol *protocol,
+    AstraFirmwareAbsolutePointerState *state_out
+);
+
+struct AstraFirmwareSimplePointerProtocol {
+    AstraFirmwarePointerReset reset;
+    AstraFirmwarePointerGetState get_state;
+    void *wait_for_input;
+    AstraFirmwarePointerMode *mode;
+};
+
+struct AstraFirmwareAbsolutePointerProtocol {
+    AstraFirmwareAbsolutePointerReset reset;
+    AstraFirmwareAbsolutePointerGetState get_state;
+    void *wait_for_input;
+    AstraFirmwareAbsolutePointerMode *mode;
+};
 
 typedef struct AstraFirmwareTextInputProtocol AstraFirmwareTextInputProtocol;
 
@@ -67,7 +136,10 @@ typedef struct AstraBootInfo {
     /* Firmware entry points are borrowed, never owned by the kernel. */
     uint64_t flags;
     AstraFirmwareTextInputProtocol *firmware_input_protocol;
+    AstraFirmwareSimplePointerProtocol *firmware_pointer_protocol;
+    AstraFirmwareAbsolutePointerProtocol *firmware_absolute_pointer_protocol;
     AstraFirmwareWaitForEvent firmware_wait_for_event;
+    void *firmware_poll_timer_event;
     uint64_t firmware_exception_level;
     uint64_t firmware_exception_vector;
     uint64_t firmware_daif;
