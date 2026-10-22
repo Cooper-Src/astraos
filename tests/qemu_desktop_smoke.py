@@ -179,7 +179,7 @@ def send_absolute_pointer(client: QMPClient, x: int, y: int, width: int, height:
     qmp_absolute_max = 0x7FFFF
     normalized_x = round(max(0, min(x, width - 1)) * qmp_absolute_max / (width - 1))
     normalized_y = round(max(0, min(y, height - 1)) * qmp_absolute_max / (height - 1))
-    client.execute("input-send-event", {"events": [
+    client.execute("input-send-event", {"device": "desktop-display", "events": [
         {"type": "abs", "data": {"axis": "x", "value": normalized_x}},
         {"type": "abs", "data": {"axis": "y", "value": normalized_y}},
     ]})
@@ -198,13 +198,13 @@ def click_at(
     occurrence: int,
 ) -> None:
     send_absolute_pointer(client, x, y, width, height)
-    client.execute("input-send-event", {"events": [
+    client.execute("input-send-event", {"device": "desktop-display", "events": [
         {"type": "btn", "data": {"button": "left", "down": True}}
     ]})
     try:
         wait_for_log_occurrence(log_path, marker, occurrence, EVENT_TIMEOUT)
     finally:
-        client.execute("input-send-event", {"events": [
+        client.execute("input-send-event", {"device": "desktop-display", "events": [
             {"type": "btn", "data": {"button": "left", "down": False}}
         ]})
 
