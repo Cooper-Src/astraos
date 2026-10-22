@@ -94,6 +94,7 @@ static bool g_menu_open;
 static uint32_t g_pointer_x;
 static uint32_t g_pointer_y;
 static bool g_pointer_left_down;
+static bool g_pointer_event_logged;
 static bool g_display_exit_requested;
 static size_t g_drag_surface_index;
 static uint32_t g_drag_offset_x;
@@ -1544,6 +1545,14 @@ static void handle_pointer_event(const AstraInputEvent *event) {
     g_pointer_x = (uint32_t)x;
     g_pointer_y = (uint32_t)y;
     g_pointer_left_down = event->left_button_down;
+    if (!g_pointer_event_logged) {
+        g_pointer_event_logged = true;
+        astra_uart_puts("ASTRAOS_POINTER_EVENT_RECEIVED ");
+        astra_uart_put_hex((uint64_t)g_pointer_x);
+        astra_uart_puts(",");
+        astra_uart_put_hex((uint64_t)g_pointer_y);
+        astra_uart_puts("\n");
+    }
 
     if (event->left_button_down && !was_down) {
         g_drag_surface_index = DISPLAY_SURFACE_CAP;
@@ -1697,6 +1706,7 @@ bool astra_display_server_run(void) {
     g_pointer_x = g_screen_width / 2u;
     g_pointer_y = g_screen_height / 2u;
     g_pointer_left_down = false;
+    g_pointer_event_logged = false;
     g_display_exit_requested = false;
     g_drag_surface_index = DISPLAY_SURFACE_CAP;
     g_drag_offset_x = 0u;
