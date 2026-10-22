@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import socket
+import struct
 import sys
 import time
 from collections import Counter
@@ -82,50 +83,90 @@ class QMPClient:
     def send_key(self, key: str) -> None:
         self.execute("human-monitor-command", {"command-line": f"sendkey {key}"})
 
-    def pointer_position(self, x: int, y: int, width: int, height: int) -> None:
-        """Place QEMU's absolute USB tablet pointer over a framebuffer location."""
-        if width < 2 or height < 2:
-            raise ValueError("framebuffer dimensions are too small for pointer injection")
-        target_x = max(0, min(x, width - 1))
-        target_y = max(0, min(y, height - 1))
-        absolute_x = target_x * 0x7FFFF // (width - 1)
-        absolute_y = target_y * 0x7FFFF // (height - 1)
-        self.execute(
-            "input-send-event",
-            {
-                "device": "video0",
-                "events": [
-                    {"type": "abs", "data": {"axis": "x", "value": absolute_x}},
-                    {"type": "abs", "data": {"axis": "y", "value": absolute_y}},
-                ],
-            },
-        )
-        time.sleep(0.15)
-
-    def mouse_button(self, down: bool) -> None:
-        self.execute(
-            "input-send-event",
-            {
-                "device": "video0",
-                "events": [
-                    {"type": "btn", "data": {"button": "left", "down": down}},
-                ],
-            },
-        )
-
-    def click(self, x: int, y: int, width: int, height: int) -> None:
-        self.pointer_position(x, y, width, height)
-        time.sleep(0.15)
-        self.mouse_button(True)
-        time.sleep(0.15)
-        self.mouse_button(False)
-        time.sleep(0.15)
-
 
     def screenshot(self, path: Path) -> tuple[int, int, Counter[tuple[int, int, int]]]:
         self.execute("human-monitor-command", {"command-line": f"screendump {path}"})
         return read_ppm(path)
 
+
+
+class VNCClient:
+    """Tiny RFB client that sends host-pointer events to QEMU's VNC backend."""
+
+    def __init__(self, host: str = "127.0.0.1", port: int = 5901) -> None:
+        self._socket = socket.create_connection((host, port), timeout=CONNECT_TIMEOUT)
+        self._socket.settimeout(COMMAND_TIMEOUT)
+        try:
+            version = self._recv_exact(12)
+            if not version.startswith(b"RFB 003."):
+                raise RuntimeError(f"VNC server sent an invalid RFB version: {version!r}")
+            self._socket.sendall(b"RFB 003.008\n")
+            sec_count = self._recv_exact(1)[0]
+            if sec_count == 0:
+                length = int.from_bytes(self._recv_exact(4), "big")
+                reason = self._recv_exact(length).decode("utf-8", errors="replace")
+                raise RuntimeError(f"VNC server rejected the connection: {reason}")
+            security_types = self._recv_exact(sec_count)
+            if 1 not in security_types:
+                raise RuntimeError(
+                    f"VNC server offered unsupported authentication types: {security_types!r}"
+                )
+            self._socket.sendall(b"\x01")
+            security_result = int.from_bytes(self._recv_exact(4), "big")
+            if security_result != 0:
+                raise RuntimeError("VNC server rejected None security")
+            self._socket.sendall(b"\x01")  # ClientInit: shared desktop.
+            server_init = self._recv_exact(24)
+            self.width, self.height = struct.unpack("!HH", server_init[:4])
+            name_length = int.from_bytes(server_init[20:24], "big")
+            if name_length:
+                self._recv_exact(name_length)
+
+            # Set a standard 32-bit pixel format and raw encoding. QMP captures
+            # screenshots separately, so the client intentionally requests no updates.
+            pixel_format = struct.pack(
+                "!BBBBHHHBBB3x",
+                32, 24, 0, 1, 255, 255, 255, 16, 8, 0,
+            )
+            self._socket.sendall(b"\x00\x00\x00\x00" + pixel_format)
+            self._socket.sendall(struct.pack("!BBHi", 2, 0, 1, 0))
+        except Exception:
+            self._socket.close()
+            raise
+
+    def _recv_exact(self, size: int) -> bytes:
+        payload = bytearray()
+        while len(payload) < size:
+            chunk = self._socket.recv(size - len(payload))
+            if not chunk:
+                raise RuntimeError("VNC server closed the connection during handshake")
+            payload.extend(chunk)
+        return bytes(payload)
+
+    def close(self) -> None:
+        self._socket.close()
+
+    def move(self, x: int, y: int) -> None:
+        x = max(0, min(x, self.width - 1))
+        y = max(0, min(y, self.height - 1))
+        self._socket.sendall(struct.pack("!BBHH", 5, 0, x, y))
+        time.sleep(0.2)
+
+    def button(self, left_down: bool, x: int, y: int) -> None:
+        x = max(0, min(x, self.width - 1))
+        y = max(0, min(y, self.height - 1))
+        self._socket.sendall(struct.pack("!BBHH", 5, 1 if left_down else 0, x, y))
+        time.sleep(0.15)
+
+    def click(self, x: int, y: int, width: int, height: int) -> None:
+        if width != self.width or height != self.height:
+            raise RuntimeError(
+                f"VNC/QMP size mismatch: VNC={self.width}x{self.height}, "
+                f"QMP={width}x{height}"
+            )
+        self.move(x, y)
+        self.button(True, x, y)
+        self.button(False, x, y)
 
 
 def read_log(path: Path) -> str:
@@ -276,6 +317,7 @@ def main(argv: list[str]) -> int:
     log_path = Path(argv[2])
     screenshot_path = log_path.with_name("desktop-screendump.ppm")
     client: QMPClient | None = None
+    mouse: VNCClient | None = None
     try:
         connect_deadline = time.monotonic() + CONNECT_TIMEOUT
         last_error: OSError | None = None
@@ -296,17 +338,21 @@ def main(argv: list[str]) -> int:
         initial_screenshot = client.screenshot(screenshot_path)
         assert_desktop_is_visible(initial_screenshot)
         width, height, _ = initial_screenshot
-        # Target the explicitly named virtual display (QMP "device" is the
-        # display device, not the guest USB mouse's model name).
-        client.pointer_position(75, 20, width, height)
-        time.sleep(0.25)
+        mouse = VNCClient()
+        if mouse.width != width or mouse.height != height:
+            raise RuntimeError(
+                f"VNC/QMP size mismatch: VNC={mouse.width}x{mouse.height}, "
+                f"QMP={width}x{height}"
+            )
+        # Exercise the same RFB pointer path a person uses with QEMU's VNC display.
+        mouse.move(75, 20)
         wait_for_log(log_path, "desktop: pointer report", EVENT_TIMEOUT)
-        client.click(75, 20, width, height)
+        mouse.click(75, 20, width, height)
         wait_for_log(log_path, "desktop: applications menu opened", EVENT_TIMEOUT)
         menu_screenshot = client.screenshot(screenshot_path)
         if menu_screenshot[2] == initial_screenshot[2]:
             raise RuntimeError("opening Applications did not change the captured desktop")
-        client.click(65, 47 + 45, width, height)
+        mouse.click(65, 47 + 45, width, height)
         wait_for_log(log_path, "desktop: terminal window opened", EVENT_TIMEOUT)
         assert_terminal_is_visible(client.screenshot(screenshot_path))
 
@@ -367,6 +413,8 @@ def main(argv: list[str]) -> int:
         print(read_log(log_path)[-6000:], file=sys.stderr)
         return 1
     finally:
+        if mouse is not None:
+            mouse.close()
         if client is not None:
             client.close()
 
