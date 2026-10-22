@@ -24,8 +24,6 @@ class QMPClient:
         self._socket = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         self._buffer = bytearray()
         self._next_id = 1
-        self._pointer_x: int | None = None
-        self._pointer_y: int | None = None
         try:
             self._socket.settimeout(CONNECT_TIMEOUT)
             self._socket.connect(socket_path)
@@ -84,42 +82,37 @@ class QMPClient:
     def send_key(self, key: str) -> None:
         self.execute("human-monitor-command", {"command-line": f"sendkey {key}"})
 
+    def select_mouse_device(self) -> str:
+        """Choose QEMU's relative mouse input device for HMP mouse commands."""
+        mice = self.execute("query-mice")
+        if not isinstance(mice, list) or not mice:
+            raise RuntimeError(f"QEMU reports no guest mouse devices: {mice!r}")
+        candidates = [mouse for mouse in mice if isinstance(mouse, dict) and not mouse.get("absolute", False)]
+        selected = candidates[0] if candidates else mice[0]
+        if not isinstance(selected, dict) or not isinstance(selected.get("index"), int):
+            raise RuntimeError(f"QEMU returned malformed mouse information: {mice!r}")
+        index = selected["index"]
+        self.execute("human-monitor-command", {"command-line": f"mouse_set {index}"})
+        return str(selected.get("name", f"mouse #{index}"))
+
     def pointer_position(self, x: int, y: int, width: int, height: int) -> None:
-        """Move an emulated relative USB mouse through bounded HID-sized motion steps."""
+        """Move the active QEMU mouse through its HMP guest-input path."""
         if width < 2 or height < 2:
             raise ValueError("framebuffer dimensions are too small for pointer injection")
         target_x = max(0, min(x, width - 1))
         target_y = max(0, min(y, height - 1))
-        if self._pointer_x is None or self._pointer_y is None:
-            # AstraOS starts its software cursor at the screen centre.
-            self._pointer_x = width // 2
-            self._pointer_y = height // 2
-
-        # The compositor doubles relative deltas, so convert screen pixels to device units.
-        remaining_x = (target_x - self._pointer_x) // 2
-        remaining_y = (target_y - self._pointer_y) // 2
-        step_limit = 48
-        while remaining_x != 0 or remaining_y != 0:
-            step_x = max(-step_limit, min(step_limit, remaining_x))
-            step_y = max(-step_limit, min(step_limit, remaining_y))
-            events: list[dict[str, Any]] = []
-            if step_x != 0:
-                events.append({"type": "rel", "data": {"axis": "x", "value": step_x}})
-            if step_y != 0:
-                events.append({"type": "rel", "data": {"axis": "y", "value": step_y}})
-            self.execute("input-send-event", {"events": events})
-            remaining_x -= step_x
-            remaining_y -= step_y
-            # Let the virtual HID report and UEFI's polling event run between packets.
-            time.sleep(0.03)
-
-        self._pointer_x = max(0, min(self._pointer_x + ((target_x - self._pointer_x) // 2) * 2, width - 1))
-        self._pointer_y = max(0, min(self._pointer_y + ((target_y - self._pointer_y) // 2) * 2, height - 1))
+        self.execute(
+            "human-monitor-command",
+            {"command-line": f"mouse_move {target_x} {target_y}"},
+        )
+        time.sleep(0.2)
 
     def mouse_button(self, down: bool) -> None:
+        # HMP mouse_button takes a complete button-state bitmask (1=left, 0=released).
+        state = 1 if down else 0
         self.execute(
-            "input-send-event",
-            {"events": [{"type": "btn", "data": {"button": "left", "down": down}}]},
+            "human-monitor-command",
+            {"command-line": f"mouse_button {state}"},
         )
 
     def click(self, x: int, y: int, width: int, height: int) -> None:
@@ -304,7 +297,10 @@ def main(argv: list[str]) -> int:
         initial_screenshot = client.screenshot(screenshot_path)
         assert_desktop_is_visible(initial_screenshot)
         width, height, _ = initial_screenshot
-        # QMP injects relative motion/button events into the emulated USB mouse.
+        selected_mouse = client.select_mouse_device()
+        print(f"QEMU mouse input selected: {selected_mouse}")
+        # HMP targets the currently selected emulated mouse, unlike display-routed
+        # QMP events which may bypass the firmware's USB HID protocol.
         client.pointer_position(75, 20, width, height)
         time.sleep(0.25)
         wait_for_log(log_path, "desktop: pointer report", EVENT_TIMEOUT)
