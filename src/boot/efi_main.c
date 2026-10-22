@@ -586,7 +586,12 @@ static bool configure_firmware_keyboard_console(
     }
     if (pointer_status == EFI_SUCCESS && pointer_interface != NULL) {
         pointer = (AstraFirmwareSimplePointerProtocol *)pointer_interface;
-        if (pointer->get_state != NULL && pointer->wait_for_input != NULL) {
+        if (pointer->reset != NULL && pointer->get_state != NULL &&
+            pointer->wait_for_input != NULL) {
+            pointer_status = pointer->reset(pointer, 1u);
+            if (pointer_status != EFI_SUCCESS) {
+                loader_out(L"Warning: Simple Pointer reset failed; continuing with polling.\\r\\n");
+            }
             boot_info->firmware_pointer_protocol = pointer;
             boot_info->flags |= ASTRA_BOOT_FLAG_UEFI_POINTER;
             loader_out(L"UEFI Simple Pointer protocol discovered.\r\n");
@@ -601,7 +606,8 @@ static bool configure_firmware_keyboard_console(
     }
     if (absolute_pointer_status == EFI_SUCCESS && pointer_interface != NULL) {
         absolute_pointer = (AstraFirmwareAbsolutePointerProtocol *)pointer_interface;
-        if (absolute_pointer->get_state != NULL &&
+        if (absolute_pointer->reset != NULL &&
+            absolute_pointer->get_state != NULL &&
             absolute_pointer->wait_for_input != NULL &&
             absolute_pointer->mode != NULL &&
             absolute_pointer->mode->absolute_max_x >
@@ -612,6 +618,10 @@ static bool configure_firmware_keyboard_console(
                 absolute_pointer->mode->absolute_min_x <= UINT32_MAX &&
             absolute_pointer->mode->absolute_max_y -
                 absolute_pointer->mode->absolute_min_y <= UINT32_MAX) {
+            absolute_pointer_status = absolute_pointer->reset(absolute_pointer, 1u);
+            if (absolute_pointer_status != EFI_SUCCESS) {
+                loader_out(L"Warning: Absolute Pointer reset failed; continuing with polling.\\r\\n");
+            }
             boot_info->firmware_absolute_pointer_protocol = absolute_pointer;
             boot_info->flags |= ASTRA_BOOT_FLAG_UEFI_ABSOLUTE_POINTER;
             loader_out(L"UEFI Absolute Pointer protocol discovered.\r\n");
