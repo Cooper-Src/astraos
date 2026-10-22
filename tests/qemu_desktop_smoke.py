@@ -455,9 +455,9 @@ def main(argv: list[str]) -> int:
             {"command-line": "info mice"},
         )
         print(f"QEMU input devices: {mice}")
-        active_mouse = re.search(r"\\*\\s*Mouse #(\\d+)", str(mice))
+        active_mouse = re.search(r"\*\s*Mouse #(\d+)", str(mice))
         if active_mouse is None:
-            active_mouse = re.search(r"Mouse #(\\d+)", str(mice))
+            active_mouse = re.search(r"Mouse #(\d+)", str(mice))
         if active_mouse is not None:
             client.active_mouse_index = int(active_mouse.group(1))
         # First try QMP's documented guest-input event path, using the absolute
