@@ -30,6 +30,9 @@ static void *g_firmware_poll_event = NULL;
 static uint64_t g_firmware_exception_level = 0u;
 static uint64_t g_firmware_exception_vector = 0u;
 static uint64_t g_firmware_daif = 0u;
+static bool g_desktop_firmware_context_active = false;
+static uint64_t g_saved_kernel_vector = 0u;
+static uint64_t g_saved_kernel_daif = 0u;
 #if defined(__aarch64__)
 static uint32_t g_pointer_probe_count = 0u;
 #endif
@@ -236,6 +239,9 @@ bool astra_input_initialize(const AstraBootInfo *boot_info, bool serial_ready) {
     g_firmware_exception_level = 0u;
     g_firmware_exception_vector = 0u;
     g_firmware_daif = 0u;
+    g_desktop_firmware_context_active = false;
+    g_saved_kernel_vector = 0u;
+    g_saved_kernel_daif = 0u;
 #if defined(__aarch64__)
     g_pointer_probe_count = 0u;
 #endif
@@ -290,6 +296,106 @@ bool astra_input_initialize(const AstraBootInfo *boot_info, bool serial_ready) {
             return true;
     }
     return false;
+}
+
+
+bool astra_input_enable_desktop_firmware_context(void) {
+#if defined(__aarch64__)
+    uint64_t kernel_vector = 0u;
+    uint64_t kernel_daif = 0u;
+
+    if (g_use_serial_input || !astra_input_pointer_available() ||
+        g_firmware_exception_vector == 0u) {
+        return false;
+    }
+    if (g_desktop_firmware_context_active) {
+        return true;
+    }
+
+    if (g_firmware_exception_level == UINT64_C(1)) {
+        __asm__ volatile(
+            "mrs %0, VBAR_EL1\n\t"
+            "mrs %1, DAIF"
+            : "=r"(kernel_vector), "=r"(kernel_daif)
+        );
+        g_saved_kernel_vector = kernel_vector;
+        g_saved_kernel_daif = kernel_daif;
+        __asm__ volatile(
+            "msr VBAR_EL1, %0\n\t"
+            "isb\n\t"
+            "msr DAIF, %1\n\t"
+            "isb"
+            :
+            : "r"(g_firmware_exception_vector), "r"(g_firmware_daif)
+            : "memory"
+        );
+    } else if (g_firmware_exception_level == UINT64_C(2)) {
+        __asm__ volatile(
+            "mrs %0, VBAR_EL2\n\t"
+            "mrs %1, DAIF"
+            : "=r"(kernel_vector), "=r"(kernel_daif)
+        );
+        g_saved_kernel_vector = kernel_vector;
+        g_saved_kernel_daif = kernel_daif;
+        __asm__ volatile(
+            "msr VBAR_EL2, %0\n\t"
+            "isb\n\t"
+            "msr DAIF, %1\n\t"
+            "isb"
+            :
+            : "r"(g_firmware_exception_vector), "r"(g_firmware_daif)
+            : "memory"
+        );
+    } else {
+        return false;
+    }
+
+    g_desktop_firmware_context_active = true;
+    astra_uart_puts(
+        "input: desktop compatibility mode keeps UEFI IRQ dispatch active; "
+        "kernel exception diagnostics are suspended until desktop exit.\n"
+    );
+    return true;
+#else
+    return false;
+#endif
+}
+
+void astra_input_disable_desktop_firmware_context(void) {
+#if defined(__aarch64__)
+    if (!g_desktop_firmware_context_active) {
+        return;
+    }
+
+    if (g_firmware_exception_level == UINT64_C(1)) {
+        __asm__ volatile(
+            "msr DAIFSet, #0xf\n\t"
+            "isb\n\t"
+            "msr VBAR_EL1, %0\n\t"
+            "isb\n\t"
+            "msr DAIF, %1\n\t"
+            "isb"
+            :
+            : "r"(g_saved_kernel_vector), "r"(g_saved_kernel_daif)
+            : "memory"
+        );
+    } else if (g_firmware_exception_level == UINT64_C(2)) {
+        __asm__ volatile(
+            "msr DAIFSet, #0xf\n\t"
+            "isb\n\t"
+            "msr VBAR_EL2, %0\n\t"
+            "isb\n\t"
+            "msr DAIF, %1\n\t"
+            "isb"
+            :
+            : "r"(g_saved_kernel_vector), "r"(g_saved_kernel_daif)
+            : "memory"
+        );
+    }
+
+    g_desktop_firmware_context_active = false;
+    astra_uart_puts("input: restored kernel exception context after desktop exit\n");
+#endif
 }
 
 bool astra_input_pointer_available(void) {
