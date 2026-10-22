@@ -1357,6 +1357,7 @@ static void render_desktop(void) {
 
 static void stop_display_server(void) {
     g_menu_open = false;
+    astra_input_disable_desktop_firmware_context();
     astra_framebuffer_set_console_enabled(true);
     astra_framebuffer_clear();
     astra_uart_puts("desktop: returned to shell\n");
@@ -1812,6 +1813,16 @@ bool astra_display_server_run(void) {
     g_input_event_counter = 0u;
     g_files_last_click_event = 0u;
     g_files_last_click_index = SIZE_MAX;
+
+    /*
+     * Firmware USB HID drivers use asynchronous interrupt transfers. In this
+     * opt-in desktop compatibility session, keep the original UEFI IRQ vector
+     * active so those callbacks can update Simple/Absolute Pointer state between
+     * GetState() calls. stop_display_server() restores the kernel vectors.
+     */
+    if (astra_input_pointer_available()) {
+        (void)astra_input_enable_desktop_firmware_context();
+    }
 
     astra_framebuffer_set_console_enabled(false);
     open_surface(DISPLAY_APP_WELCOME);
