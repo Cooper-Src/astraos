@@ -91,11 +91,15 @@ class QMPClient:
 
 
 class VNCClient:
-    """Tiny RFB client that sends host-pointer events to QEMU's VNC backend."""
+    """Tiny RFB client that sends relative mouse events through QEMU's VNC console."""
 
     def __init__(self, host: str = "127.0.0.1", port: int = 5901) -> None:
         self._socket = socket.create_connection((host, port), timeout=CONNECT_TIMEOUT)
         self._socket.settimeout(COMMAND_TIMEOUT)
+        self.width = 0
+        self.height = 0
+        self._pointer_x: int | None = None
+        self._pointer_y: int | None = None
         try:
             version = self._recv_exact(12)
             if not version.startswith(b"RFB 003."):
@@ -122,14 +126,16 @@ class VNCClient:
             if name_length:
                 self._recv_exact(name_length)
 
-            # Set a standard 32-bit pixel format and raw encoding. QMP captures
-            # screenshots separately, so the client intentionally requests no updates.
+            # Standard pixel format and raw encoding. We don't request framebuffer
+            # updates because QMP captures screenshots; only input events are needed.
             pixel_format = struct.pack(
                 "!BBBBHHHBBB3x",
                 32, 24, 0, 1, 255, 255, 255, 16, 8, 0,
             )
             self._socket.sendall(b"\x00\x00\x00\x00" + pixel_format)
             self._socket.sendall(struct.pack("!BBHi", 2, 0, 1, 0))
+            self._pointer_x = self.width // 2
+            self._pointer_y = self.height // 2
         except Exception:
             self._socket.close()
             raise
@@ -146,16 +152,48 @@ class VNCClient:
     def close(self) -> None:
         self._socket.close()
 
-    def move(self, x: int, y: int) -> None:
-        x = max(0, min(x, self.width - 1))
-        y = max(0, min(y, self.height - 1))
-        self._socket.sendall(struct.pack("!BBHH", 5, 0, x, y))
-        time.sleep(0.2)
+    def _send_relative(self, delta_x: int, delta_y: int, button_mask: int = 0) -> None:
+        # QEMU's relative VNC mode decodes each coordinate as coordinate - 0x7fff.
+        # Feeding literal framebuffer coordinates creates giant negative movement.
+        rfb_x = max(0, min(0xFFFF, 0x7FFF + delta_x))
+        rfb_y = max(0, min(0xFFFF, 0x7FFF + delta_y))
+        self._socket.sendall(struct.pack("!BBHH", 5, button_mask, rfb_x, rfb_y))
 
-    def button(self, left_down: bool, x: int, y: int) -> None:
-        x = max(0, min(x, self.width - 1))
-        y = max(0, min(y, self.height - 1))
-        self._socket.sendall(struct.pack("!BBHH", 5, 1 if left_down else 0, x, y))
+    def move(self, x: int, y: int) -> None:
+        if self.width < 2 or self.height < 2:
+            raise RuntimeError("VNC server reported invalid dimensions")
+        target_x = max(0, min(x, self.width - 1))
+        target_y = max(0, min(y, self.height - 1))
+        current_x = self._pointer_x if self._pointer_x is not None else self.width // 2
+        current_y = self._pointer_y if self._pointer_y is not None else self.height // 2
+
+        # AstraOS scales UEFI relative movement to two framebuffer pixels per count.
+        remaining_x = (target_x - current_x) // 2
+        remaining_y = (target_y - current_y) // 2
+        step_limit = 48
+        moved_x = 0
+        moved_y = 0
+        while remaining_x != 0 or remaining_y != 0:
+            step_x = max(-step_limit, min(step_limit, remaining_x))
+            step_y = max(-step_limit, min(step_limit, remaining_y))
+            self._send_relative(step_x, step_y)
+            remaining_x -= step_x
+            remaining_y -= step_y
+            moved_x += step_x
+            moved_y += step_y
+            # Allow the USB mouse report and UEFI async interrupt path to be serviced.
+            time.sleep(0.04)
+
+        self._pointer_x = max(
+            0, min(current_x + moved_x * 2, self.width - 1)
+        )
+        self._pointer_y = max(
+            0, min(current_y + moved_y * 2, self.height - 1)
+        )
+        time.sleep(0.15)
+
+    def button(self, left_down: bool) -> None:
+        self._send_relative(0, 0, 1 if left_down else 0)
         time.sleep(0.15)
 
     def click(self, x: int, y: int, width: int, height: int) -> None:
@@ -165,8 +203,10 @@ class VNCClient:
                 f"QMP={width}x{height}"
             )
         self.move(x, y)
-        self.button(True, x, y)
-        self.button(False, x, y)
+        self.button(True)
+        self.button(False)
+
+
 
 
 def read_log(path: Path) -> str:
