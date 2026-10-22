@@ -103,6 +103,110 @@ def wait_for_log(path: Path, needle: str, timeout: float) -> str:
     )
 
 
+def wait_for_log_occurrence(
+    path: Path, needle: str, occurrence: int, timeout: float
+) -> str:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        content = read_log(path)
+        if content.count(needle) >= occurrence:
+            return content
+        time.sleep(0.1)
+    content = read_log(path)
+    raise TimeoutError(
+        f"serial output did not reach occurrence {occurrence} of {needle!r}. "
+        f"Final output:\\n{content[-6000:] if content else '(serial log is empty)'}"
+    )
+
+
+def save_and_check_screenshot(client: QMPClient, path: Path) -> tuple[int, int]:
+    path.unlink(missing_ok=True)
+    client.execute("screendump", {"filename": str(path), "format": "ppm"})
+    data = path.read_bytes()
+    position = 0
+
+    def token() -> bytes:
+        nonlocal position
+        while position < len(data):
+            if data[position] in b" \t\r\n":
+                position += 1
+            elif data[position] == ord("#"):
+                while position < len(data) and data[position] not in b"\r\n":
+                    position += 1
+            else:
+                break
+        start = position
+        while position < len(data) and data[position] not in b" \t\r\n#":
+            position += 1
+        if start == position:
+            raise ValueError("invalid PPM screenshot header")
+        return data[start:position]
+
+    if token() != b"P6":
+        raise ValueError("QEMU screenshot is not a binary RGB PPM")
+    width = int(token())
+    height = int(token())
+    max_value = int(token())
+    if width < 480 or height < 360 or max_value != 255:
+        raise ValueError(f"unexpected desktop screenshot geometry/format: {width}x{height}, max={max_value}")
+    if position < len(data) and data[position:position + 2] == b"\r\n":
+        position += 2
+    elif position < len(data) and data[position] in b" \t\r\n":
+        position += 1
+    pixels = data[position:]
+    if len(pixels) != width * height * 3:
+        raise ValueError(
+            f"truncated screenshot: expected {width * height * 3} RGB bytes, got {len(pixels)}"
+        )
+
+    sample_step_x = max(1, width // 48)
+    sample_step_y = max(1, height // 32)
+    colors: set[tuple[int, int, int]] = set()
+    for y in range(0, height, sample_step_y):
+        for x in range(0, width, sample_step_x):
+            offset = (y * width + x) * 3
+            colors.add((pixels[offset], pixels[offset + 1], pixels[offset + 2]))
+    if len(colors) < 12:
+        raise ValueError(
+            f"desktop screenshot looks blank/unrendered: only {len(colors)} sampled colors"
+        )
+    print(f"Desktop screenshot validated: {width}x{height}, {len(colors)} sampled colors ({path}).")
+    return width, height
+
+
+def send_absolute_pointer(client: QMPClient, x: int, y: int, width: int, height: int) -> None:
+    normalized_x = round(max(0, min(x, width - 1)) * 32767 / (width - 1))
+    normalized_y = round(max(0, min(y, height - 1)) * 32767 / (height - 1))
+    client.execute("input-send-event", {"events": [
+        {"type": "abs", "data": {"axis": "x", "value": normalized_x}},
+        {"type": "abs", "data": {"axis": "y", "value": normalized_y}},
+    ]})
+    # Let the firmware pointer driver consume movement before the button change.
+    time.sleep(0.25)
+
+
+def click_at(
+    client: QMPClient,
+    log_path: Path,
+    x: int,
+    y: int,
+    width: int,
+    height: int,
+    marker: str,
+    occurrence: int,
+) -> None:
+    send_absolute_pointer(client, x, y, width, height)
+    client.execute("input-send-event", {"events": [
+        {"type": "btn", "data": {"button": "left", "down": True}}
+    ]})
+    try:
+        wait_for_log_occurrence(log_path, marker, occurrence, EVENT_TIMEOUT)
+    finally:
+        client.execute("input-send-event", {"events": [
+            {"type": "btn", "data": {"button": "left", "down": False}}
+        ]})
+
+
 def type_command(client: QMPClient, command: str) -> None:
     for character in command:
         if character == " ":
@@ -119,12 +223,13 @@ def type_command(client: QMPClient, command: str) -> None:
 
 
 def main(argv: list[str]) -> int:
-    if len(argv) != 3:
-        print(f"usage: {argv[0]} QMP_SOCKET SERIAL_LOG", file=sys.stderr)
+    if len(argv) != 4:
+        print(f"usage: {argv[0]} QMP_SOCKET SERIAL_LOG SCREENSHOT_PPM", file=sys.stderr)
         return 2
 
     socket_path = argv[1]
     log_path = Path(argv[2])
+    screenshot_path = Path(argv[3])
     client: QMPClient | None = None
     try:
         connect_deadline = time.monotonic() + CONNECT_TIMEOUT
@@ -140,6 +245,8 @@ def main(argv: list[str]) -> int:
             raise RuntimeError(f"could not connect to QMP socket: {last_error}")
 
         wait_for_log(log_path, "ASTRAOS_DISPLAY_SERVER_READY", BOOT_TIMEOUT)
+        wait_for_log(log_path, "ASTRAOS_POINTER_INPUT_READY", BOOT_TIMEOUT)
+        screen_width, screen_height = save_and_check_screenshot(client, screenshot_path)
         client.send_key("t")
         wait_for_log(log_path, "desktop: terminal window opened", EVENT_TIMEOUT)
         type_command(client, "help")
@@ -162,9 +269,55 @@ def main(argv: list[str]) -> int:
         wait_for_log(log_path, "desktop: window closed", EVENT_TIMEOUT)
         client.send_key("n")
         wait_for_log(log_path, "desktop: window minimized", EVENT_TIMEOUT)
-        client.send_key("q")
+
+        start_marker = "desktop: mouse start menu opened"
+        click_at(
+            client, log_path, 90, 20, screen_width, screen_height,
+            start_marker, 1
+        )
+        # Capture the actual start menu too, so CI verifies more than a boot marker.
+        save_and_check_screenshot(client, screenshot_path)
+
+        click_at(
+            client, log_path, 90, 121, screen_width, screen_height,
+            "desktop: mouse files opened", 1
+        )
+        # Taskbar buttons must minimise the active app and restore it on the next click.
+        click_at(
+            client, log_path, min(272, screen_width - 20), 20,
+            screen_width, screen_height, "desktop: mouse task minimized", 1
+        )
+        click_at(
+            client, log_path, min(272, screen_width - 20), 20,
+            screen_width, screen_height, "desktop: mouse task restored", 1
+        )
+
+        click_at(
+            client, log_path, 90, 20, screen_width, screen_height,
+            start_marker, 2
+        )
+        click_at(
+            client, log_path, 90, 94, screen_width, screen_height,
+            "desktop: mouse terminal opened", 1
+        )
+        type_command(client, "help")
+        wait_for_log_occurrence(
+            log_path, "desktop: terminal command help", 2, EVENT_TIMEOUT
+        )
+        type_command(client, "exit")
+        wait_for_log_occurrence(
+            log_path, "desktop: terminal window closed", 2, EVENT_TIMEOUT
+        )
+        click_at(
+            client, log_path, 90, 20, screen_width, screen_height,
+            start_marker, 3
+        )
+        click_at(
+            client, log_path, 90, 174, screen_width, screen_height,
+            "desktop: mouse returned to shell", 1
+        )
         wait_for_log(log_path, "desktop: returned to shell", EVENT_TIMEOUT)
-        print("AstraOS desktop smoke test passed: compositor, shared-filesystem terminal, launcher, file manager and window controls worked.")
+        print("AstraOS desktop smoke test passed: framebuffer pixels, keyboard, terminal, Files, mouse clicks, start menu, taskbar minimise/restore and return-to-shell all worked.")
         return 0
     except (OSError, RuntimeError, TimeoutError, ValueError, json.JSONDecodeError) as error:
         print(f"desktop smoke test failed: {error}", file=sys.stderr)
