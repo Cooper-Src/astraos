@@ -24,7 +24,7 @@ jobs:
       - name: Install compiler, ISO, and emulator tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang llvm lld xorriso dosfstools mtools qemu-system-arm qemu-efi-aarch64 file python3
+          sudo apt-get install -y clang llvm lld xorriso dosfstools mtools qemu-system-arm qemu-efi-aarch64 file python3 xvfb xdotool
 
       - name: Run sanitizer tests and build the native kernel and images
         run: bash ./scripts/build.sh
@@ -131,6 +131,7 @@ jobs:
       - name: Smoke-test graphical desktop and compositor in QEMU
         shell: bash
         run: |
+          xvfb-run -a -s "-screen 0 1024x768x24" bash -s <<'DESKTOP_TEST'
           set -euo pipefail
           CODE="$(find /usr/share -name 'AAVMF_CODE.fd' -print -quit)"
           VARS_TEMPLATE="$(find /usr/share -name 'AAVMF_VARS.fd' -print -quit)"
@@ -146,7 +147,7 @@ jobs:
             -drive if=pflash,unit=0,format=raw,readonly=on,file="$CODE" \
             -drive if=pflash,unit=1,format=raw,file=build/uefi-desktop-vars.fd \
             -cdrom build/astraos-aarch64-desktop.iso -boot order=d \
-            -display vnc=127.0.0.1:5 -serial file:build/qemu-desktop-serial.log -monitor none \
+            -display gtk,show-menubar=off -serial file:build/qemu-desktop-serial.log -monitor none \
             -qmp unix:build/qmp-desktop.sock,server=on,wait=off \
             > build/qemu-desktop-launch.log 2>&1 &
           QEMU_PID=$!
@@ -160,6 +161,7 @@ jobs:
           trap - EXIT
           cat build/qemu-desktop-launch.log
           cat build/qemu-desktop-serial.log
+          DESKTOP_TEST
 
       - name: Upload live images and diagnostics
         uses: actions/upload-artifact@v4
