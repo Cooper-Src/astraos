@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import re
 import socket
 import sys
 import time
@@ -91,7 +92,7 @@ class QMPClient:
     def send_mouse_button(self, down: bool) -> None:
         self.execute(
             "input-send-event",
-            {"events": [{"type": "btn", "data": {"button": "left", "down": down}}],
+            {"events": [{"type": "btn", "data": {"button": "left", "down": down}}]},
         )
 
     def click(self) -> None:
@@ -176,7 +177,7 @@ def main(argv: list[str]) -> int:
         wait_for_log(log_path, "desktop: terminal window opened by pointer", EVENT_TIMEOUT)
 
         # Verify a real taskbar click can minimise and restore the application.
-        client.send_pointer_motion(70, -35)
+        client.send_pointer_motion(115, -35)
         time.sleep(0.15)
         client.click()
         wait_for_log(log_path, "desktop: window minimized", EVENT_TIMEOUT)
