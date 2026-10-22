@@ -175,8 +175,10 @@ def save_and_check_screenshot(client: QMPClient, path: Path) -> tuple[int, int]:
 
 
 def send_absolute_pointer(client: QMPClient, x: int, y: int, width: int, height: int) -> None:
-    normalized_x = round(max(0, min(x, width - 1)) * 32767 / (width - 1))
-    normalized_y = round(max(0, min(y, height - 1)) * 32767 / (height - 1))
+    # QEMU QMP InputMoveEvent uses absolute axes in the range 0..0x7ffff.
+    qmp_absolute_max = 0x7FFFF
+    normalized_x = round(max(0, min(x, width - 1)) * qmp_absolute_max / (width - 1))
+    normalized_y = round(max(0, min(y, height - 1)) * qmp_absolute_max / (height - 1))
     client.execute("input-send-event", {"events": [
         {"type": "abs", "data": {"axis": "x", "value": normalized_x}},
         {"type": "abs", "data": {"axis": "y", "value": normalized_y}},
