@@ -4,7 +4,7 @@
 #include <stdint.h>
 
 #define ASTRA_BOOT_INFO_MAGIC UINT64_C(0x4153545241424f4f)
-#define ASTRA_BOOT_INFO_VERSION UINT64_C(6)
+#define ASTRA_BOOT_INFO_VERSION UINT64_C(7)
 #define ASTRA_BOOT_MEMORY_MAP_CAP_BYTES (UINT64_C(16384) * UINT64_C(8))
 
 #define ASTRA_BOOT_FLAG_BOOT_SERVICES_ACTIVE (UINT64_C(1) << 0u)
@@ -45,6 +45,14 @@ typedef uint64_t (*AstraFirmwareWaitForEvent)(
 
 typedef struct AstraFirmwareSimplePointerProtocol AstraFirmwareSimplePointerProtocol;
 typedef struct AstraFirmwareAbsolutePointerProtocol AstraFirmwareAbsolutePointerProtocol;
+typedef uint64_t (*AstraFirmwareSimplePointerReset)(
+    AstraFirmwareSimplePointerProtocol *protocol,
+    uint8_t extended_verification
+);
+typedef uint64_t (*AstraFirmwareAbsolutePointerReset)(
+    AstraFirmwareAbsolutePointerProtocol *protocol,
+    uint8_t extended_verification
+);
 
 typedef struct AstraFirmwareSimplePointerState {
     int32_t relative_x;
@@ -77,7 +85,7 @@ typedef uint64_t (*AstraFirmwareSimplePointerGetState)(
 );
 
 struct AstraFirmwareSimplePointerProtocol {
-    void *reset;
+    AstraFirmwareSimplePointerReset reset;
     AstraFirmwareSimplePointerGetState get_state;
     void *wait_for_input;
     void *mode;
@@ -89,7 +97,7 @@ typedef uint64_t (*AstraFirmwareAbsolutePointerGetState)(
 );
 
 struct AstraFirmwareAbsolutePointerProtocol {
-    void *reset;
+    AstraFirmwareAbsolutePointerReset reset;
     AstraFirmwareAbsolutePointerGetState get_state;
     void *wait_for_input;
     const AstraFirmwareAbsolutePointerMode *mode;
@@ -125,6 +133,7 @@ typedef struct AstraBootInfo {
     AstraFirmwareWaitForEvent firmware_wait_for_event;
     AstraFirmwareSimplePointerProtocol *firmware_simple_pointer_protocol;
     AstraFirmwareAbsolutePointerProtocol *firmware_absolute_pointer_protocol;
+    void *firmware_pointer_poll_event;
     uint64_t firmware_exception_level;
     uint64_t firmware_exception_vector;
     uint64_t firmware_daif;
