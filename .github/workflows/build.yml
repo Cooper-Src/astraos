@@ -185,6 +185,7 @@ jobs:
             build/qemu-keyboard-launch.log
             build/qemu-desktop-serial.log
             build/qemu-desktop-launch.log
+            build/desktop-screendump.ppm
           if-no-files-found: warn
           retention-days: 30
 
