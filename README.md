@@ -31,18 +31,18 @@ The build runs the VFS, FDT, physical-memory, MMIO, ACPI, platform, and framebuf
 
 - `build/astraos-aarch64.iso` — UEFI-bootable optical-disc image.
 - `build/astraos-aarch64-esp.img` — generic FAT EFI system partition image.
-- `build/astraos-qemu-virt.iso` — QEMU `virt` image with a test device tree and the normal PL011/ExitBootServices path.
-- `build/astraos-qemu-virt-esp.img` — matching QEMU serial-test ESP image.
-- `build/astraos-qemu-keyboard.iso` — QEMU `virt` image with a test device tree and the UEFI keyboard compatibility path.
-- `build/astraos-qemu-keyboard-esp.img` — matching QEMU keyboard-test ESP image.
-- `build/astraos-qemu-desktop.iso` — QEMU `virt` image that boots directly into the graphical desktop and uses UEFI firmware keyboard input.
-- `build/astraos-qemu-desktop-esp.img` — matching desktop-test ESP image.
+- `build/astraos-aarch64-virt.iso` — virtual-platform validation image with a test device tree and the normal PL011/ExitBootServices path.
+- `build/astraos-aarch64-virt-esp.img` — matching EFI System Partition image for virtual-platform validation.
+- `build/astraos-aarch64-keyboard.iso` — virtual-platform image with the UEFI keyboard compatibility path enabled.
+- `build/astraos-aarch64-keyboard-esp.img` — matching keyboard-enabled EFI System Partition image.
+- `build/astraos-aarch64-desktop.iso` — live desktop image that boots directly into the graphical desktop with UEFI firmware keyboard input.
+- `build/astraos-aarch64-desktop-esp.img` — matching desktop EFI System Partition image.
 - `build/kernel.elf` and `build/kernel.bin` — kernel debug and flat images.
 - `build/SHA256SUMS` — portable SHA-256 checksums. Verify them with `cd build && sha256sum -c SHA256SUMS`.
 
 ## Boot and interact in QEMU
 
-Install QEMU ARM64 and an AArch64 UEFI firmware package (for example, `qemu-efi-aarch64`). Use `astraos-qemu-virt.iso` for interactive QEMU testing; it includes a test-only DTB that identifies QEMU's PL011 UART. The generic image omits that fixture and prefers the device tree or ACPI description provided by the target firmware. With a graphical display, run:
+Install QEMU ARM64 and an AArch64 UEFI firmware package (for example, `qemu-efi-aarch64`). Use `astraos-aarch64-virt.iso` for virtual-platform serial testing; it includes a test-only DTB that identifies the virtual machine's PL011 UART. The generic image omits that fixture and prefers the device tree or ACPI description provided by the target firmware. With a graphical display, run:
 
     CODE="$(find /usr/share -name AAVMF_CODE.fd -print -quit)"
     VARS_TEMPLATE="$(find /usr/share -name AAVMF_VARS.fd -print -quit)"
@@ -52,14 +52,14 @@ Install QEMU ARM64 and an AArch64 UEFI firmware package (for example, `qemu-efi-
       -device ramfb \
       -drive if=pflash,format=raw,unit=0,readonly=on,file="$CODE" \
       -drive if=pflash,format=raw,unit=1,file=/tmp/astraos-vars.fd \
-      -cdrom build/astraos-qemu-virt.iso -boot order=d \
+      -cdrom build/astraos-aarch64-virt.iso -boot order=d \
       -display default -serial stdio -monitor none
 
 The kernel draws to the framebuffer when UEFI supplies a supported GOP mode and also mirrors text to serial. In this image, **type commands in the terminal running QEMU**, because input comes from the emulated PL011 UART.
 
-To test the UEFI keyboard compatibility path without the desktop, use `build/astraos-qemu-keyboard.iso` with a graphical QEMU display and a USB keyboard. The loader reads `keyboard-console.cfg` from the EFI partition to opt in to firmware input. This lets UEFI continue servicing keyboard events after the kernel starts; it is a compatibility layer, not native USB/HID support. If firmware does not expose working text input, the kernel will still fall back to display-only diagnostics.
+To test the UEFI keyboard compatibility path without the desktop, use `build/astraos-aarch64-keyboard.iso` with a graphical QEMU display and a USB keyboard. The loader reads `keyboard-console.cfg` from the EFI partition to opt in to firmware input. This lets UEFI continue servicing keyboard events after the kernel starts; it is a compatibility layer, not native USB/HID support. If firmware does not expose working text input, the kernel will still fall back to display-only diagnostics.
 
-To boot the desktop, use `build/astraos-qemu-desktop.iso` with a graphical QEMU display and USB keyboard. It includes both `keyboard-console.cfg` and `desktop-mode.cfg`, so the loader retains firmware keyboard support and starts the graphical environment rather than the shell. Use `T` for Terminal, `F` for File Manager, `A` for About, `M` for the Applications menu, `W` to switch the focused window, `C` to close, `N` to minimise, `X` to maximise/restore, and `Q` to leave the desktop. The Terminal and File Manager share the kernel's in-memory VFS: Terminal supports `help`, `uname`, `about`, `pwd`, `ls`, `cd`, `cat`, `whoami`, `touch`, `mkdir`, `write`, `rm`, `clear`, and `exit`; Files navigates directories with `j`/`k`, opens a selected entry with Enter, moves up with Backspace, and opens text files in a viewer. Changes remain in RAM and disappear on reboot. These are kernel-owned surfaces, not separate user processes. There is no mouse cursor, drag/resize support, persistent storage, or native USB/HID input yet.
+To boot the desktop, use `build/astraos-aarch64-desktop.iso` with a graphical QEMU display and USB keyboard. It includes both `keyboard-console.cfg` and `desktop-mode.cfg`, so the loader retains firmware keyboard support and starts the graphical environment rather than the shell. Use `T` for Terminal, `F` for File Manager, `A` for About, `M` for the Applications menu, `W` to switch the focused window, `C` to close, `N` to minimise, `X` to maximise/restore, and `Q` to leave the desktop. The Terminal and File Manager share the kernel's in-memory VFS: Terminal supports `help`, `uname`, `about`, `pwd`, `ls`, `cd`, `cat`, `whoami`, `touch`, `mkdir`, `write`, `rm`, `clear`, and `exit`; Files navigates directories with `j`/`k`, opens a selected entry with Enter, moves up with Backspace, and opens text files in a viewer. Changes remain in RAM and disappear on reboot. These are kernel-owned surfaces, not separate user processes. There is no mouse cursor, drag/resize support, persistent storage, or native USB/HID input yet.
 
 To use a headless serial-only session, replace `-display default` with `-display none`. Commands include:
 
