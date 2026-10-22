@@ -20,6 +20,13 @@ typedef struct AstraInputEvent {
     int32_t pointer_dz;
     bool left_button;
     bool right_button;
+    bool absolute;
+    uint64_t absolute_x;
+    uint64_t absolute_y;
+    uint64_t absolute_min_x;
+    uint64_t absolute_max_x;
+    uint64_t absolute_min_y;
+    uint64_t absolute_max_y;
 } AstraInputEvent;
 
 /* Selects firmware input when requested, otherwise the detected serial console. */
