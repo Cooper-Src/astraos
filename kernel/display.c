@@ -106,6 +106,7 @@ static size_t g_drag_surface_index;
 static uint32_t g_drag_offset_x;
 static uint32_t g_drag_offset_y;
 static bool g_last_file_click_valid;
+static bool g_logged_pointer_event;
 static size_t g_last_file_click_selection;
 
 static size_t string_length(const char *text) {
@@ -1624,6 +1625,11 @@ static uint32_t map_absolute_axis(
 static bool handle_pointer_event(const AstraInputEvent *event) {
     const bool left_was_down = g_pointer_left_down;
 
+    if (!g_logged_pointer_event) {
+        g_logged_pointer_event = true;
+        astra_uart_puts("desktop: pointer event received\n");
+    }
+
     if (event->absolute) {
         g_pointer_x = map_absolute_axis(
             event->absolute_x, event->absolute_min_x, event->absolute_max_x,
@@ -1801,6 +1807,7 @@ bool astra_display_server_run(void) {
     g_drag_offset_y = 0u;
     g_last_file_click_valid = false;
     g_last_file_click_selection = 0u;
+    g_logged_pointer_event = false;
 
     astra_framebuffer_set_console_enabled(false);
     open_surface(DISPLAY_APP_WELCOME);
