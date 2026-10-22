@@ -82,18 +82,26 @@ class QMPClient:
         self.execute("human-monitor-command", {"command-line": f"sendkey {key}"})
 
     def send_pointer_motion(self, dx: int, dy: int) -> None:
-        # HMP mouse commands target QEMU's selected mouse device. This matters
-        # for headless runs where QMP input-send-event lacks a display seat.
         self.execute(
-            "human-monitor-command",
-            {"command-line": f"mouse_move {dx} {dy}"},
+            "input-send-event",
+            {
+                "device": "video0",
+                "events": [
+                    {"type": "rel", "data": {"axis": "x", "value": dx}},
+                    {"type": "rel", "data": {"axis": "y", "value": dy}},
+                ],
+            },
         )
 
     def send_mouse_button(self, down: bool) -> None:
-        # HMP button state is a bitmask: 1 = left, 0 = released.
         self.execute(
-            "human-monitor-command",
-            {"command-line": f"mouse_button {1 if down else 0}"},
+            "input-send-event",
+            {
+                "device": "video0",
+                "events": [
+                    {"type": "btn", "data": {"button": "left", "down": down}}
+                ],
+            },
         )
 
     def click(self) -> None:
