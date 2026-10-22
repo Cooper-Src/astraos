@@ -121,7 +121,7 @@ def type_command(client: QMPClient, command: str) -> None:
 
 
 
-def find_qemu_window() -> str:
+def find_qemu_window() -> tuple[str, int, int]:
     deadline = time.monotonic() + CONNECT_TIMEOUT
     last_error = ""
     while time.monotonic() < deadline:
@@ -131,33 +131,45 @@ def find_qemu_window() -> str:
             capture_output=True,
             text=True,
         )
-        window_ids = result.stdout.split()
-        for window_id in window_ids:
+        for window_id in result.stdout.split():
             geometry = subprocess.run(
                 ["xdotool", "getwindowgeometry", "--shell", window_id],
                 check=False,
                 capture_output=True,
                 text=True,
             )
-            if geometry.returncode == 0:
-                values: dict[str, int] = {}
-                for line in geometry.stdout.splitlines():
-                    if "=" in line:
-                        name, value = line.split("=", 1)
-                        if name in {"WIDTH", "HEIGHT"}:
-                            try:
-                                values[name] = int(value)
-                            except ValueError:
-                                pass
-                if values.get("WIDTH", 0) >= 480 and values.get("HEIGHT", 0) >= 360:
-                    return window_id
+            if geometry.returncode != 0:
+                continue
+            values: dict[str, int] = {}
+            for line in geometry.stdout.splitlines():
+                if "=" in line:
+                    name, value = line.split("=", 1)
+                    if name in {"X", "Y", "WIDTH", "HEIGHT"}:
+                        try:
+                            values[name] = int(value)
+                        except ValueError:
+                            pass
+            if values.get("WIDTH", 0) >= 480 and values.get("HEIGHT", 0) >= 360:
+                # Focus first so the initial click cannot be consumed by the host window manager.
+                subprocess.run(
+                    ["xdotool", "windowfocus", "--sync", window_id],
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                )
+                print(
+                    "QEMU GTK window: "
+                    f"id={window_id} origin=({values.get('X', 0)},{values.get('Y', 0)}) "
+                    f"size={values['WIDTH']}x{values['HEIGHT']}"
+                )
+                return window_id, values.get("X", 0), values.get("Y", 0)
         last_error = result.stderr.strip()
         time.sleep(0.1)
     raise TimeoutError(f"could not find the visible QEMU GTK window: {last_error}")
 
 
 def move_mouse_to(
-    window_id: str,
+    window: tuple[str, int, int],
     current_x: int,
     current_y: int,
     target_x: int,
@@ -167,19 +179,39 @@ def move_mouse_to(
 ) -> tuple[int, int]:
     if target_x < 0 or target_x >= screen_width or target_y < 0 or target_y >= screen_height:
         raise ValueError("mouse target falls outside the guest framebuffer")
+    _window_id, origin_x, origin_y = window
+    root_x = origin_x + target_x
+    root_y = origin_y + target_y
     subprocess.run(
-        ["xdotool", "mousemove", "--window", window_id, str(target_x), str(target_y)],
+        ["xdotool", "mousemove", str(root_x), str(root_y)],
         check=True,
         capture_output=True,
         text=True,
     )
     time.sleep(0.2)
+    if current_x == screen_width // 2 and current_y == screen_height // 2:
+        location = subprocess.run(
+            ["xdotool", "getmouselocation", "--shell"],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        print(f"Host pointer after movement: {location.stdout.strip()}")
     return target_x, target_y
 
 
-def click_mouse(window_id: str, x: int, y: int) -> None:
+def click_mouse(window: tuple[str, int, int], x: int, y: int) -> None:
+    _window_id, origin_x, origin_y = window
+    root_x = origin_x + x
+    root_y = origin_y + y
     subprocess.run(
-        ["xdotool", "mousemove", "--window", window_id, str(x), str(y), "click", "1"],
+        ["xdotool", "mousemove", str(root_x), str(root_y)],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    subprocess.run(
+        ["xdotool", "click", "1"],
         check=True,
         capture_output=True,
         text=True,
