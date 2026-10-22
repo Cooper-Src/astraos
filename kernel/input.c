@@ -1,6 +1,8 @@
 #include "input.h"
 
+#if defined(ASTRAOS_KERNEL_BUILD)
 #include "uart.h"
+#endif
 
 #include <stddef.h>
 #include <stdint.h>
@@ -28,8 +30,10 @@ static AstraFirmwareSimplePointerProtocol *g_firmware_pointer = NULL;
 static AstraFirmwareAbsolutePointerProtocol *g_firmware_absolute_pointer = NULL;
 static AstraFirmwareWaitForEvent g_wait_for_event = NULL;
 static AstraFirmwareStall g_firmware_stall = NULL;
+#if defined(ASTRAOS_KERNEL_BUILD)
 static bool g_absolute_pointer_not_ready_logged = false;
 static bool g_absolute_pointer_state_logged = false;
+#endif
 static uint64_t g_firmware_exception_level = 0u;
 static uint64_t g_firmware_exception_vector = 0u;
 static uint64_t g_firmware_daif = 0u;
@@ -314,8 +318,10 @@ bool astra_input_initialize(const AstraBootInfo *boot_info, bool serial_ready) {
     g_firmware_absolute_pointer = NULL;
     g_wait_for_event = NULL;
     g_firmware_stall = NULL;
+#if defined(ASTRAOS_KERNEL_BUILD)
     g_absolute_pointer_not_ready_logged = false;
     g_absolute_pointer_state_logged = false;
+#endif
     g_firmware_exception_level = 0u;
     g_firmware_exception_vector = 0u;
     g_firmware_daif = 0u;
@@ -475,6 +481,7 @@ bool astra_input_read_event(AstraInputEvent *event_out) {
             const AstraFirmwareAbsolutePointerMode *mode =
                 g_firmware_absolute_pointer->mode;
             status = firmware_read_absolute_pointer_state(&pointer_state);
+#if defined(ASTRAOS_KERNEL_BUILD)
             if (status == ASTRA_INPUT_EFI_NOT_READY &&
                 !g_absolute_pointer_not_ready_logged) {
                 g_absolute_pointer_not_ready_logged = true;
@@ -482,7 +489,9 @@ bool astra_input_read_event(AstraInputEvent *event_out) {
                     "desktop: absolute pointer GetState returned EFI_NOT_READY; polling for changes.\n"
                 );
             }
+#endif
             if (status == ASTRA_INPUT_EFI_SUCCESS) {
+#if defined(ASTRAOS_KERNEL_BUILD)
                 if (!g_absolute_pointer_state_logged) {
                     g_absolute_pointer_state_logged = true;
                     astra_uart_puts("desktop: absolute pointer state received x=");
@@ -493,6 +502,7 @@ bool astra_input_read_event(AstraInputEvent *event_out) {
                     astra_uart_put_u32(pointer_state.active_buttons);
                     astra_uart_puts("\n");
                 }
+#endif
                 event_out->kind = ASTRA_INPUT_EVENT_POINTER;
                 event_out->absolute = true;
                 event_out->absolute_x = pointer_state.current_x;
