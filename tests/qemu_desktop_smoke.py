@@ -113,10 +113,37 @@ class VNCClient:
             self._socket.sendall(b"\x01")  # ClientInit: shared session.
             server_init = self._read_exact(24)
             self.width, self.height = struct.unpack("!HH", server_init[:4])
+            bits_per_pixel = server_init[4]
+            if bits_per_pixel not in (8, 16, 32):
+                raise RuntimeError(f"unsupported VNC pixel format: {bits_per_pixel} bits/pixel")
             name_length = struct.unpack("!I", server_init[20:24])[0]
             self._read_exact(name_length)
             if self.width < 1 or self.height < 1:
                 raise RuntimeError(f"invalid VNC screen size: {self.width}x{self.height}")
+
+            # Complete the basic RFB client setup and request the first framebuffer.
+            # Raw is deliberately the only encoding requested, making updates bounded
+            # and independent of optional VNC extensions.
+            self._socket.sendall(b"\\x00\\x00\\x00\\x00" + server_init[4:20])
+            self._socket.sendall(struct.pack("!BBH", 2, 0, 1) + struct.pack("!i", 0))
+            self._socket.sendall(
+                struct.pack("!BBHHHH", 3, 0, 0, 0, self.width, self.height)
+            )
+            update_header = self._read_exact(4)
+            if update_header[0] != 0:
+                raise RuntimeError(f"expected VNC framebuffer update, got type {update_header[0]}")
+            rect_count = struct.unpack("!H", update_header[2:4])[0]
+            pixel_bytes = bits_per_pixel // 8
+            for _ in range(rect_count):
+                rectangle = self._read_exact(12)
+                rect_width, rect_height = struct.unpack("!HH", rectangle[4:8])
+                encoding = struct.unpack("!i", rectangle[8:12])[0]
+                if encoding == 0:  # Raw rectangle.
+                    self._read_exact(rect_width * rect_height * pixel_bytes)
+                elif encoding == 1:  # CopyRect.
+                    self._read_exact(4)
+                else:
+                    raise RuntimeError(f"unexpected VNC encoding {encoding} in raw-only session")
         except Exception:
             self._socket.close()
             raise
