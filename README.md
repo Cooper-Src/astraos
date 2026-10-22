@@ -59,7 +59,24 @@ The kernel draws to the framebuffer when UEFI supplies a supported GOP mode and 
 
 To test the UEFI keyboard compatibility path without the desktop, use `build/astraos-aarch64-keyboard.iso` with a graphical QEMU display and a USB keyboard. The loader reads `keyboard-console.cfg` from the EFI partition to opt in to firmware input. This lets UEFI continue servicing keyboard events after the kernel starts; it is a compatibility layer, not native USB/HID support. If firmware does not expose working text input, the kernel will still fall back to display-only diagnostics.
 
-To boot the desktop, use `build/astraos-aarch64-desktop.iso` with a graphical QEMU display and USB keyboard. It includes both `keyboard-console.cfg` and `desktop-mode.cfg`, so the loader retains firmware keyboard support and starts the graphical environment rather than the shell. Use `T` for Terminal, `F` for File Manager, `A` for About, `M` for the Applications menu, `W` to switch the focused window, `C` to close, `N` to minimise, `X` to maximise/restore, and `Q` to leave the desktop. The Terminal and File Manager share the kernel's in-memory VFS: Terminal supports `help`, `uname`, `about`, `pwd`, `ls`, `cd`, `cat`, `whoami`, `touch`, `mkdir`, `write`, `rm`, `clear`, and `exit`; Files navigates directories with `j`/`k`, opens a selected entry with Enter, moves up with Backspace, and opens text files in a viewer. Changes remain in RAM and disappear on reboot. These are kernel-owned surfaces, not separate user processes. There is no mouse cursor, drag/resize support, persistent storage, or native USB/HID input yet.
+To boot the desktop, use `build/astraos-aarch64-desktop.iso` with a graphical QEMU display, a USB keyboard, and a USB mouse. For example:
+
+```sh
+CODE="$(find /usr/share -name 'AAVMF_CODE.fd' -print -quit)"
+VARS_TEMPLATE="$(find /usr/share -name 'AAVMF_VARS.fd' -print -quit)"
+cp "$VARS_TEMPLATE" /tmp/astraos-desktop-vars.fd
+qemu-system-aarch64 \
+  -machine virt -cpu cortex-a72 -m 1024 \
+  -device ramfb -device qemu-xhci -device usb-kbd -device usb-mouse \
+  -drive if=pflash,format=raw,unit=0,readonly=on,file="$CODE" \
+  -drive if=pflash,format=raw,unit=1,file=/tmp/astraos-desktop-vars.fd \
+  -cdrom build/astraos-aarch64-desktop.iso -boot order=d \
+  -display default -serial stdio -monitor none
+```
+
+The desktop image includes `keyboard-console.cfg` and `desktop-mode.cfg`. The loader looks for the UEFI Simple Pointer Protocol and, when firmware exposes it, provides mouse motion and left-click events to the desktop. Click **Applications** to launch Terminal, Files, or About; click the task buttons to minimise/restore or focus windows; drag a title bar to move a window; use the window controls; click a file entry to open it. Keyboard shortcuts remain available: `T` Terminal, `F` Files, `A` About, `M` Applications, `W` switch windows, `C` close, `N` minimise, `X` maximise/restore, and `Q` return to the shell. If the firmware has no Simple Pointer implementation, the desktop prints a diagnostic and keyboard shortcuts still work.
+
+The Terminal and File Manager share the kernel's in-memory VFS. Terminal supports `help`, `uname`, `about`, `pwd`, `ls`, `cd`, `cat`, `whoami`, `touch`, `mkdir`, `write`, `rm`, `clear`, and `exit`; Files navigates directories with `j`/`k`, opens an entry with Enter, moves up with Backspace, and opens text files in a viewer. Changes stay in RAM and disappear on reboot. Window surfaces are still kernel-owned, not isolated user processes. The pointer backend is a UEFI firmware compatibility layer—not a native USB/HID driver—so mouse support depends on the firmware publishing and servicing Simple Pointer; native USB/HID, persistent storage, user-space isolation, keyboard text-editing enhancements, and window resizing remain future work.
 
 To use a headless serial-only session, replace `-display default` with `-display none`. Commands include:
 
