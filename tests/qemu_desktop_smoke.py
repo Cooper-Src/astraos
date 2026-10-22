@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import json
-import re
 import socket
 import sys
 import time
@@ -102,6 +101,58 @@ class QMPClient:
         time.sleep(0.12)
 
 
+
+def verify_screen_capture(client: QMPClient, path: Path) -> None:
+    """Reject an unpainted framebuffer, even if serial-side tests pass."""
+    path.unlink(missing_ok=True)
+    client.execute(
+        "human-monitor-command",
+        {"command-line": f"screendump {path}"},
+    )
+    deadline = time.monotonic() + 3.0
+    while time.monotonic() < deadline and not path.exists():
+        time.sleep(0.05)
+    try:
+        payload = path.read_bytes()
+    except OSError as error:
+        raise RuntimeError(f"QEMU did not produce a desktop screenshot: {error}") from error
+
+    header_end = payload.find(b"\\n255\\n")
+    if not payload.startswith(b"P6") or header_end < 0:
+        raise RuntimeError("QEMU screenshot is not a valid binary PPM image")
+    header_tokens = payload[:header_end].split()
+    if len(header_tokens) != 3:
+        raise RuntimeError("QEMU screenshot has a malformed PPM header")
+    width, height = int(header_tokens[1]), int(header_tokens[2])
+    if width < 480 or height < 360:
+        raise RuntimeError(f"unexpected desktop geometry: {width}x{height}")
+
+    pixels = payload[header_end + 5:]
+    expected_bytes = width * height * 3
+    if len(pixels) != expected_bytes:
+        raise RuntimeError(
+            f"truncated screenshot: expected {expected_bytes} pixels bytes, "
+            f"found {len(pixels)}"
+        )
+
+    sampled_colors: set[bytes] = set()
+    step_x = max(width // 32, 1)
+    step_y = max(height // 24, 1)
+    for y in range(0, height, step_y):
+        for x in range(0, width, step_x):
+            offset = (y * width + x) * 3
+            sampled_colors.add(pixels[offset:offset + 3])
+    if len(sampled_colors) < 8:
+        raise RuntimeError(
+            f"desktop framebuffer appears blank: only {len(sampled_colors)} "
+            "sampled colours"
+        )
+    print(
+        f"Framebuffer screenshot validated: {width}x{height}, "
+        f"{len(sampled_colors)} sampled colours."
+    )
+
+
 def read_log(path: Path) -> str:
     try:
         return path.read_text(encoding="utf-8", errors="replace")
@@ -161,6 +212,7 @@ def main(argv: list[str]) -> int:
 
         wait_for_log(log_path, "ASTRAOS_DISPLAY_SERVER_READY", BOOT_TIMEOUT)
         wait_for_log(log_path, "ASTRAOS_POINTER_AVAILABLE", EVENT_TIMEOUT)
+        verify_screen_capture(client, log_path.with_name("desktop-screen.ppm"))
 
         # QEMU starts the pointer at the centre. Move to the top-left corner,
         # then to the Applications launcher and click it using guest mouse events.
