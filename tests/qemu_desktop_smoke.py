@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import socket
+import struct
 import sys
 import time
 from collections import Counter
@@ -115,6 +116,81 @@ class QMPClient:
     def screenshot(self, path: Path) -> tuple[int, int, Counter[tuple[int, int, int]]]:
         self.execute("human-monitor-command", {"command-line": f"screendump {path}"})
         return read_ppm(path)
+
+
+
+class VNCClient:
+    """Minimal unauthenticated RFB client that sends real VNC pointer events."""
+
+    def __init__(self, host: str = "127.0.0.1", port: int = 5901) -> None:
+        self._socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self._socket.settimeout(CONNECT_TIMEOUT)
+        self.width = 0
+        self.height = 0
+        try:
+            self._socket.connect((host, port))
+            version = self._recv_exact(12)
+            if not version.startswith(b"RFB 003."):
+                raise RuntimeError(f"unsupported VNC server version: {version!r}")
+            self._socket.sendall(b"RFB 003.008\n")
+
+            security_count = self._recv_exact(1)[0]
+            if security_count == 0:
+                reason_length = struct.unpack("!I", self._recv_exact(4))[0]
+                reason = self._recv_exact(reason_length).decode("utf-8", errors="replace")
+                raise RuntimeError(f"VNC server rejected connection: {reason}")
+            security_types = self._recv_exact(security_count)
+            if 1 not in security_types:
+                raise RuntimeError(
+                    f"VNC requires unsupported authentication types: {list(security_types)}"
+                )
+            self._socket.sendall(b"\x01")
+            security_result = struct.unpack("!I", self._recv_exact(4))[0]
+            if security_result != 0:
+                raise RuntimeError(f"VNC security handshake failed: {security_result}")
+
+            self._socket.sendall(b"\x01")  # ClientInit: shared connection.
+            server_init = self._recv_exact(24)
+            self.width, self.height = struct.unpack("!HH", server_init[:4])
+            name_length = struct.unpack("!I", server_init[20:24])[0]
+            if name_length > 4096:
+                raise RuntimeError(f"VNC desktop name is unexpectedly large: {name_length}")
+            self._recv_exact(name_length)
+            if self.width < 480 or self.height < 360:
+                raise RuntimeError(f"VNC display is too small: {self.width}x{self.height}")
+        except Exception:
+            self._socket.close()
+            raise
+
+    def _recv_exact(self, count: int) -> bytes:
+        buffer = bytearray()
+        while len(buffer) < count:
+            chunk = self._socket.recv(count - len(buffer))
+            if not chunk:
+                raise RuntimeError("VNC server closed the connection during handshake")
+            buffer.extend(chunk)
+        return bytes(buffer)
+
+    def close(self) -> None:
+        self._socket.close()
+
+    def move_to(self, x: int, y: int, width: int, height: int) -> None:
+        if width != self.width or height != self.height:
+            raise RuntimeError(
+                f"VNC/QMP display size differs: VNC={self.width}x{self.height}, "
+                f"QMP={width}x{height}"
+            )
+        bounded_x = max(0, min(x, self.width - 1))
+        bounded_y = max(0, min(y, self.height - 1))
+        self._socket.sendall(struct.pack("!BBHH", 5, 0, bounded_x, bounded_y))
+
+    def click(self, x: int, y: int, width: int, height: int) -> None:
+        self.move_to(x, y, width, height)
+        time.sleep(0.08)
+        self._socket.sendall(struct.pack("!BBHH", 5, 1, x, y))
+        time.sleep(0.12)
+        self._socket.sendall(struct.pack("!BBHH", 5, 0, x, y))
+        time.sleep(0.12)
 
 
 def read_log(path: Path) -> str:
@@ -243,6 +319,7 @@ def main(argv: list[str]) -> int:
     log_path = Path(argv[2])
     screenshot_path = log_path.with_name("desktop-screendump.ppm")
     client: QMPClient | None = None
+    mouse: VNCClient | None = None
     try:
         connect_deadline = time.monotonic() + CONNECT_TIMEOUT
         last_error: OSError | None = None
@@ -263,14 +340,20 @@ def main(argv: list[str]) -> int:
         initial_screenshot = client.screenshot(screenshot_path)
         assert_desktop_is_visible(initial_screenshot)
         width, height, _ = initial_screenshot
+        mouse = VNCClient()
+        if mouse.width != width or mouse.height != height:
+            raise RuntimeError(
+                f"VNC/QMP size mismatch: VNC={mouse.width}x{mouse.height}, "
+                f"QMP={width}x{height}"
+            )
 
-        # Open the start menu, then launch Terminal using an actual pointer click.
-        client.click(75, 20, width, height)
+        # Drive the emulated USB tablet through the VNC/RFB pointer path.
+        mouse.click(75, 20, width, height)
         wait_for_log(log_path, "desktop: applications menu opened", EVENT_TIMEOUT)
         menu_screenshot = client.screenshot(screenshot_path)
         if menu_screenshot[2] == initial_screenshot[2]:
             raise RuntimeError("opening Applications did not change the captured desktop")
-        client.click(65, 47 + 45, width, height)
+        mouse.click(65, 47 + 45, width, height)
         wait_for_log(log_path, "desktop: terminal window opened", EVENT_TIMEOUT)
 
         type_command(client, "help")
@@ -330,6 +413,8 @@ def main(argv: list[str]) -> int:
         print(read_log(log_path)[-6000:], file=sys.stderr)
         return 1
     finally:
+        if mouse is not None:
+            mouse.close()
         if client is not None:
             client.close()
 
