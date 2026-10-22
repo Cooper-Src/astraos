@@ -26,6 +26,7 @@ typedef struct AstraFirmwareCallState {
 static bool g_use_serial_input = false;
 static AstraFirmwareTextInputProtocol *g_firmware_input = NULL;
 static AstraFirmwareSimplePointerProtocol *g_firmware_pointer = NULL;
+static AstraFirmwarePointerEventQueue *g_firmware_pointer_events = NULL;
 static void *g_firmware_pointer_poll_event = NULL;
 static AstraFirmwareWaitForEvent g_wait_for_event = NULL;
 static uint64_t g_firmware_exception_level = 0u;
@@ -146,11 +147,20 @@ static uint64_t firmware_read_key(AstraFirmwareInputKey *key_out) {
     return status;
 }
 
+static int32_t clamp_pointer_delta(int64_t delta) {
+    if (delta > INT32_MAX) {
+        return INT32_MAX;
+    }
+    if (delta < INT32_MIN) {
+        return INT32_MIN;
+    }
+    return (int32_t)delta;
+}
+
 static bool firmware_poll_pointer(AstraInputEvent *event_out, bool *ready_out) {
-    AstraFirmwareCallState state = {0};
-    AstraFirmwareSimplePointerState pointer_state = {0};
-    AstraFirmwareSimplePointerProtocol *pointer = g_firmware_pointer;
-    uint64_t status = ASTRA_INPUT_EFI_UNSUPPORTED;
+    AstraFirmwarePointerEventQueue *queue = g_firmware_pointer_events;
+    int64_t dx = 0;
+    int64_t dy = 0;
     bool left = false;
     bool right = false;
     bool changed = false;
@@ -159,44 +169,23 @@ static bool firmware_poll_pointer(AstraInputEvent *event_out, bool *ready_out) {
         return false;
     }
     *ready_out = false;
-    if (pointer == NULL) {
+    if (g_firmware_pointer == NULL || queue == NULL) {
         return true;
     }
 
-#if defined(__aarch64__)
-    if (!firmware_context_enter(&state)) {
-        g_firmware_pointer = NULL;
-        return true;
-    }
-    status = pointer->get_state(pointer, &pointer_state);
-    firmware_context_leave(&state);
+    /*
+     * The firmware notification is dispatched synchronously by WaitForEvent.
+     * Once that call has returned, the kernel can consume and clear the queue
+     * without racing the firmware callback.
+     */
+    dx = queue->pending_delta_x;
+    dy = queue->pending_delta_y;
+    queue->pending_delta_x = 0;
+    queue->pending_delta_y = 0;
+    left = queue->left_button != 0u;
+    right = queue->right_button != 0u;
 
-    g_pointer_poll_count++;
-    if (status == ASTRA_INPUT_EFI_NOT_READY &&
-        (g_pointer_poll_count <= UINT64_C(3) ||
-            (g_pointer_poll_count % UINT64_C(100)) == 0u)) {
-        astra_uart_puts("input: UEFI mouse GetState not ready; poll=");
-        astra_uart_put_hex(g_pointer_poll_count);
-        astra_uart_puts("\\n");
-    }
-#else
-    (void)state;
-    (void)pointer_state;
-#endif
-
-    if (status == ASTRA_INPUT_EFI_NOT_READY) {
-        return true;
-    }
-    if (status != ASTRA_INPUT_EFI_SUCCESS) {
-        g_firmware_pointer = NULL;
-        astra_uart_puts("UEFI pointer polling failed; mouse input disabled.\n");
-        return true;
-    }
-
-    left = pointer_state.left_button != 0u;
-    right = pointer_state.right_button != 0u;
-    changed = pointer_state.relative_movement_x != 0 ||
-        pointer_state.relative_movement_y != 0 ||
+    changed = dx != 0 || dy != 0 ||
         left != g_last_pointer_left || right != g_last_pointer_right;
     g_last_pointer_left = left;
     g_last_pointer_right = right;
@@ -204,8 +193,8 @@ static bool firmware_poll_pointer(AstraInputEvent *event_out, bool *ready_out) {
     if (changed) {
         event_out->type = ASTRA_INPUT_EVENT_POINTER;
         event_out->key = 0u;
-        event_out->pointer_dx = pointer_state.relative_movement_x;
-        event_out->pointer_dy = pointer_state.relative_movement_y;
+        event_out->pointer_dx = clamp_pointer_delta(dx);
+        event_out->pointer_dy = clamp_pointer_delta(dy);
         event_out->left_button_down = left;
         event_out->right_button_down = right;
         *ready_out = true;
@@ -272,6 +261,7 @@ bool astra_input_initialize(const AstraBootInfo *boot_info, bool serial_ready) {
     g_use_serial_input = false;
     g_firmware_input = NULL;
     g_firmware_pointer = NULL;
+    g_firmware_pointer_events = NULL;
     g_firmware_pointer_poll_event = NULL;
     g_wait_for_event = NULL;
     g_firmware_exception_level = 0u;
@@ -297,6 +287,7 @@ bool astra_input_initialize(const AstraBootInfo *boot_info, bool serial_ready) {
             (uint64_t)ASTRA_INPUT_VBAR_ALIGNMENT_MASK) == 0u) {
         g_firmware_input = boot_info->firmware_input_protocol;
         g_firmware_pointer = boot_info->firmware_pointer_protocol;
+        g_firmware_pointer_events = boot_info->firmware_pointer_events;
         g_firmware_pointer_poll_event = boot_info->firmware_pointer_poll_event;
         if (g_firmware_pointer != NULL &&
             (g_firmware_pointer->get_state == NULL ||

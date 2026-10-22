@@ -4,7 +4,7 @@
 #include <stdint.h>
 
 #define ASTRA_BOOT_INFO_MAGIC UINT64_C(0x4153545241424f4f)
-#define ASTRA_BOOT_INFO_VERSION UINT64_C(7)
+#define ASTRA_BOOT_INFO_VERSION UINT64_C(8)
 #define ASTRA_BOOT_MEMORY_MAP_CAP_BYTES (UINT64_C(16384) * UINT64_C(8))
 
 #define ASTRA_BOOT_FLAG_BOOT_SERVICES_ACTIVE (UINT64_C(1) << 0u)
@@ -26,6 +26,18 @@ typedef struct AstraFirmwareSimplePointerState {
     uint8_t left_button;
     uint8_t right_button;
 } AstraFirmwareSimplePointerState;
+
+/*
+ * Queue filled by a firmware timer notification while UEFI Boot Services are
+ * running. The kernel consumes it only after the notification has returned.
+ */
+typedef struct AstraFirmwarePointerEventQueue {
+    volatile int64_t pending_delta_x;
+    volatile int64_t pending_delta_y;
+    volatile uint64_t sequence;
+    volatile uint8_t left_button;
+    volatile uint8_t right_button;
+} AstraFirmwarePointerEventQueue;
 
 typedef uint64_t (*AstraFirmwareResetPointer)(
     AstraFirmwareSimplePointerProtocol *protocol,
@@ -99,6 +111,7 @@ typedef struct AstraBootInfo {
     uint64_t firmware_daif;
     /* Borrowed UEFI Simple Pointer Protocol; valid only while Boot Services are active. */
     AstraFirmwareSimplePointerProtocol *firmware_pointer_protocol;
+    AstraFirmwarePointerEventQueue *firmware_pointer_events;
     /* Periodic timer event for UEFI firmware that does not signal pointer WaitForInput. */
     void *firmware_pointer_poll_event;
 } AstraBootInfo;

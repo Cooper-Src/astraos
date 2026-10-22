@@ -39,6 +39,7 @@ enum {
 };
 
 #define EFI_EVT_TIMER UINT32_C(0x80000000)
+#define EFI_EVT_NOTIFY_SIGNAL UINT32_C(0x00000200)
 
 enum {
     KERNEL_STAGING_CAP = 1024u * 1024u,
@@ -101,9 +102,10 @@ typedef EFI_STATUS (EFIAPI *EFI_GET_MEMORY_MAP)(
 );
 typedef EFI_STATUS (EFIAPI *EFI_EXIT_BOOT_SERVICES)(EFI_HANDLE, EFI_UINTN);
 typedef EFI_STATUS (EFIAPI *EFI_LOCATE_PROTOCOL)(EFI_GUID *, void *, void **);
+typedef void (EFIAPI *EFI_EVENT_NOTIFY)(void *event, void *context);
 typedef EFI_STATUS (EFIAPI *EFI_CREATE_EVENT)(
     EFI_UINT32 type, EFI_UINTN notify_tpl,
-    void *notify_function, void *notify_context, void **event_out
+    EFI_EVENT_NOTIFY notify_function, void *notify_context, void **event_out
 );
 typedef EFI_STATUS (EFIAPI *EFI_SET_TIMER)(
     void *event, EFI_UINT32 type, EFI_UINT64 trigger_time
@@ -276,6 +278,7 @@ static EFI_UINT8 g_desktop_mode_marker[64];
 static EFI_UINT8 g_kernel_staging[KERNEL_STAGING_CAP];
 static EFI_UINT64 g_memory_map[MEMORY_MAP_WORDS];
 static AstraBootInfo g_boot_info;
+static AstraFirmwarePointerEventQueue g_firmware_pointer_events;
 static EFI_STATUS g_output_error = EFI_SUCCESS;
 static EFI_SIMPLE_TEXT_OUTPUT_PROTOCOL *g_active_console = NULL;
 static bool g_boot_services_exited = false;
@@ -1035,6 +1038,57 @@ static void capture_framebuffer(EFI_BOOT_SERVICES *boot_services, AstraBootInfo 
  * Capture the UEFI Simple Pointer protocol for the optional desktop. The
  * protocol is borrowed and may only be called while Boot Services remain live.
  */
+
+static int64_t pointer_delta_add_saturated(int64_t current, int32_t delta) {
+    const int64_t change = (int64_t)delta;
+
+    if (change > 0 && current > INT64_MAX - change) {
+        return INT64_MAX;
+    }
+    if (change < 0 && current < INT64_MIN - change) {
+        return INT64_MIN;
+    }
+    return current + change;
+}
+
+/*
+ * Run inside UEFI's own event-dispatch context. Some firmware USB drivers
+ * process asynchronous HID reports only while firmware notifications run;
+ * calling GetState from the kernel's exception context is not sufficient.
+ */
+static void EFIAPI firmware_pointer_poll_notify(void *event, void *context) {
+    AstraBootInfo *boot_info = (AstraBootInfo *)context;
+    AstraFirmwareSimplePointerProtocol *pointer = NULL;
+    AstraFirmwarePointerEventQueue *queue = NULL;
+    AstraFirmwareSimplePointerState state = {0};
+    EFI_STATUS status = EFI_NOT_READY;
+
+    (void)event;
+    if (boot_info == NULL) {
+        return;
+    }
+    pointer = boot_info->firmware_pointer_protocol;
+    queue = boot_info->firmware_pointer_events;
+    if (pointer == NULL || pointer->get_state == NULL || queue == NULL) {
+        return;
+    }
+
+    status = pointer->get_state(pointer, &state);
+    if (status != EFI_SUCCESS) {
+        return;
+    }
+
+    queue->pending_delta_x = pointer_delta_add_saturated(
+        queue->pending_delta_x, state.relative_movement_x
+    );
+    queue->pending_delta_y = pointer_delta_add_saturated(
+        queue->pending_delta_y, state.relative_movement_y
+    );
+    queue->left_button = state.left_button != 0u ? 1u : 0u;
+    queue->right_button = state.right_button != 0u ? 1u : 0u;
+    queue->sequence++;
+}
+
 static void capture_firmware_pointer(
     EFI_BOOT_SERVICES *boot_services,
     AstraBootInfo *boot_info
@@ -1047,6 +1101,7 @@ static void capture_firmware_pointer(
         return;
     }
     boot_info->firmware_pointer_protocol = NULL;
+    boot_info->firmware_pointer_events = NULL;
     boot_info->firmware_pointer_poll_event = NULL;
     if (boot_services == NULL || boot_services->LocateProtocol == NULL) {
         return;
@@ -1077,7 +1132,13 @@ static void capture_firmware_pointer(
         }
     }
 
+    g_firmware_pointer_events.pending_delta_x = 0;
+    g_firmware_pointer_events.pending_delta_y = 0;
+    g_firmware_pointer_events.sequence = 0u;
+    g_firmware_pointer_events.left_button = 0u;
+    g_firmware_pointer_events.right_button = 0u;
     boot_info->firmware_pointer_protocol = pointer;
+    boot_info->firmware_pointer_events = &g_firmware_pointer_events;
     loader_out(L"UEFI relative mouse detected.\\r\\n");
 
     /*
@@ -1092,7 +1153,11 @@ static void capture_firmware_pointer(
         void *poll_event = NULL;
 
         timer_status = boot_services->CreateEvent(
-            EFI_EVT_TIMER, EFI_TPL_CALLBACK, NULL, NULL, &poll_event
+            EFI_EVT_TIMER | EFI_EVT_NOTIFY_SIGNAL,
+            EFI_TPL_CALLBACK,
+            firmware_pointer_poll_notify,
+            boot_info,
+            &poll_event
         );
         if (timer_status == EFI_SUCCESS && poll_event != NULL) {
             timer_status = boot_services->SetTimer(
@@ -1104,12 +1169,14 @@ static void capture_firmware_pointer(
                 loader_out(L"UEFI mouse polling timer enabled.\\r\\n");
             } else {
                 (void)boot_services->CloseEvent(poll_event);
+                boot_info->firmware_pointer_events = NULL;
                 loader_out(L"Warning: UEFI mouse polling timer could not start.\\r\\n");
             }
         } else {
             if (poll_event != NULL) {
                 (void)boot_services->CloseEvent(poll_event);
             }
+            boot_info->firmware_pointer_events = NULL;
             loader_out(L"Warning: UEFI mouse polling timer could not be created.\\r\\n");
         }
     } else {
@@ -1214,6 +1281,7 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *system_table) {
     g_boot_info.firmware_exception_vector = 0u;
     g_boot_info.firmware_daif = 0u;
     g_boot_info.firmware_pointer_protocol = NULL;
+    g_boot_info.firmware_pointer_events = NULL;
 
     if (keyboard_console_mode_requested(image, system_table)) {
         if (configure_firmware_keyboard_console(&g_boot_info, system_table)) {
