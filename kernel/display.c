@@ -92,6 +92,7 @@ static size_t g_viewer_content_length;
 static size_t g_viewer_scroll;
 static bool g_menu_open;
 static bool g_pointer_available;
+static bool g_pointer_event_reported;
 static bool g_pointer_left_down;
 static bool g_pointer_dragging;
 static uint32_t g_pointer_x;
@@ -1603,6 +1604,15 @@ static bool handle_pointer_event(const AstraInputEvent *event) {
     g_pointer_x = (uint32_t)next_x;
     g_pointer_y = (uint32_t)next_y;
 
+    if (!g_pointer_event_reported) {
+        g_pointer_event_reported = true;
+        astra_uart_puts("desktop: first pointer event x=");
+        astra_uart_put_hex(g_pointer_x);
+        astra_uart_puts(" y=");
+        astra_uart_put_hex(g_pointer_y);
+        astra_uart_puts(event->absolute_position ? " absolute\\n" : " relative\\n");
+    }
+
     if (g_pointer_dragging && event->left_button &&
         g_pointer_drag_surface != NULL && g_pointer_drag_surface->visible &&
         !g_pointer_drag_surface->maximized) {
@@ -1639,11 +1649,17 @@ static bool handle_pointer_event(const AstraInputEvent *event) {
     bool leave_desktop = false;
 
     if (!left_was_down && event->left_button) {
+        astra_uart_puts("desktop: mouse button down x=");
+        astra_uart_put_hex(g_pointer_x);
+        astra_uart_puts(" y=");
+        astra_uart_put_hex(g_pointer_y);
+        astra_uart_puts("\\n");
         g_pointer_dragging = false;
         g_pointer_drag_surface = NULL;
         leave_desktop = handle_pointer_click();
     }
     if (left_was_down && !event->left_button) {
+        astra_uart_puts("desktop: mouse button up\\n");
         g_pointer_dragging = false;
         g_pointer_drag_surface = NULL;
     }
@@ -1690,6 +1706,7 @@ bool astra_display_server_run(void) {
     g_viewer_scroll = 0u;
     g_menu_open = false;
     g_pointer_available = astra_input_pointer_available();
+    g_pointer_event_reported = false;
     g_pointer_left_down = false;
     g_pointer_dragging = false;
     g_pointer_drag_surface = NULL;
