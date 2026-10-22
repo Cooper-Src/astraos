@@ -98,7 +98,6 @@ class QMPClient:
         self.execute(
             "input-send-event",
             {
-                "device": "video0",
                 "events": [
                     {
                         "type": "abs",
@@ -119,7 +118,6 @@ class QMPClient:
         self.execute(
             "input-send-event",
             {
-                "device": "video0",
                 "events": [{"type": "btn", "data": {"button": "left", "down": down}}],
             },
         )
@@ -473,7 +471,8 @@ def main(argv: list[str]) -> int:
             wait_for_log(log_path, "desktop: pointer report", 1.5)
             wait_for_log(log_path, "desktop: applications menu opened", 1.5)
             print("Desktop pointer test used QMP absolute input events.")
-        except TimeoutError:
+        except (TimeoutError, RuntimeError) as qmp_error:
+            print(f"QMP absolute-pointer route unavailable; trying HMP/VNC: {qmp_error}")
             # QEMU's HMP mouse_set/mouse_move API explicitly selects its active
             # emulated mouse, which is useful when several input backends exist.
             client.hmp_click(75, 20, width, height)
@@ -482,7 +481,8 @@ def main(argv: list[str]) -> int:
                 wait_for_log(log_path, "desktop: applications menu opened", EVENT_TIMEOUT)
                 pointer = HMPPointer(client)
                 print("Desktop pointer test used the QEMU active-mouse monitor API.")
-            except TimeoutError:
+            except (TimeoutError, RuntimeError) as hmp_error:
+                print(f"QEMU HMP mouse route unavailable; trying VNC: {hmp_error}")
                 mouse = VNCClient()
                 if mouse.width != width or mouse.height != height:
                     raise RuntimeError(
