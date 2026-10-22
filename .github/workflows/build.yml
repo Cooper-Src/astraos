@@ -163,6 +163,7 @@ jobs:
           cat build/qemu-desktop-serial.log
 
       - name: Upload live images and diagnostics
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: astraos-aarch64-live
@@ -184,7 +185,7 @@ jobs:
             build/qemu-keyboard-launch.log
             build/qemu-desktop-serial.log
             build/qemu-desktop-launch.log
-          if-no-files-found: error
+          if-no-files-found: warn
           retention-days: 30
 
       # A versioned build refreshes rolling first. The official release step below
