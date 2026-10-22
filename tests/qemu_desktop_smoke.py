@@ -92,6 +92,7 @@ class QMPClient:
         self.execute(
             "input-send-event",
             {
+                "device": "ramfb",
                 "events": [
                     {"type": "abs", "data": {"axis": "x", "value": absolute_x}},
                     {"type": "abs", "data": {"axis": "y", "value": absolute_y}},
@@ -102,7 +103,10 @@ class QMPClient:
     def mouse_button(self, down: bool) -> None:
         self.execute(
             "input-send-event",
-            {"events": [{"type": "btn", "data": {"button": "left", "down": down}}]},
+            {
+                "device": "ramfb",
+                "events": [{"type": "btn", "data": {"button": "left", "down": down}}],
+            },
         )
 
     def click(self, x: int, y: int, width: int, height: int) -> None:
@@ -369,8 +373,14 @@ def main(argv: list[str]) -> int:
                 f"QMP={width}x{height}"
             )
 
-        # Drive the emulated USB tablet through the VNC/RFB pointer path.
-        mouse.click(75, 20, width, height)
+        # QMP can route input to a specific display device. Try that path first,
+        # then fall back to actual RFB pointer events if this QEMU build ignores it.
+        client.pointer_position(75, 20, width, height)
+        time.sleep(0.25)
+        if "desktop: pointer report" in read_log(log_path):
+            client.click(75, 20, width, height)
+        else:
+            mouse.click(75, 20, width, height)
         wait_for_log(log_path, "desktop: applications menu opened", EVENT_TIMEOUT)
         menu_screenshot = client.screenshot(screenshot_path)
         if menu_screenshot[2] == initial_screenshot[2]:
