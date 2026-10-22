@@ -1611,13 +1611,15 @@ static bool handle_desktop_icon_pointer_click(void) {
 static void handle_file_manager_pointer_click(AstraDisplaySurface *surface) {
     AstraVfsEntry entries[ASTRA_VFS_MAX_NODES];
     size_t count = 0u;
-    const uint32_t first_row_y =
-        surface->y + DISPLAY_TITLEBAR_HEIGHT + 18u + 23u - 3u;
+    uint32_t first_row_y = 0u;
     size_t row = 0u;
     size_t selected = 0u;
 
-    if (surface == NULL || surface->app != DISPLAY_APP_FILES ||
-        g_pointer_y < first_row_y ||
+    if (surface == NULL || surface->app != DISPLAY_APP_FILES) {
+        return;
+    }
+    first_row_y = surface->y + DISPLAY_TITLEBAR_HEIGHT + 18u + 23u - 3u;
+    if (g_pointer_y < first_row_y ||
         g_pointer_y >= first_row_y + DISPLAY_FILE_ROWS * 18u ||
         !files_list(entries, &count)) {
         return;
