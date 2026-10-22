@@ -11,6 +11,10 @@ uint8_t astra_uart_get_byte(void) {
     return g_serial_byte;
 }
 
+void astra_uart_puts(const char *text) {
+    (void)text;
+}
+
 #define CHECK(condition) \
     do { \
         if (!(condition)) { \
