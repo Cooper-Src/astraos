@@ -83,6 +83,36 @@ class QMPClient:
     def send_key(self, key: str) -> None:
         self.execute("human-monitor-command", {"command-line": f"sendkey {key}"})
 
+    def pointer_position(self, x: int, y: int, width: int, height: int) -> None:
+        """Inject absolute pointer coordinates via QMP into the guest input path."""
+        if width < 2 or height < 2:
+            raise ValueError("framebuffer dimensions are too small for pointer injection")
+        x = max(0, min(x, width - 1))
+        y = max(0, min(y, height - 1))
+        absolute_x = x * 0x7FFF // (width - 1)
+        absolute_y = y * 0x7FFF // (height - 1)
+        self.execute(
+            "input-send-event",
+            {
+                "events": [
+                    {"type": "abs", "data": {"axis": "x", "value": absolute_x}},
+                    {"type": "abs", "data": {"axis": "y", "value": absolute_y}},
+                ]
+            },
+        )
+        time.sleep(0.15)
+
+    def mouse_button(self, down: bool) -> None:
+        self.execute(
+            "input-send-event",
+            {"events": [{"type": "btn", "data": {"button": "left", "down": down}}]},
+        )
+        time.sleep(0.15)
+
+    def click(self, x: int, y: int, width: int, height: int) -> None:
+        self.pointer_position(x, y, width, height)
+        self.mouse_button(True)
+        self.mouse_button(False)
 
     def screenshot(self, path: Path) -> tuple[int, int, Counter[tuple[int, int, int]]]:
         self.execute("human-monitor-command", {"command-line": f"screendump {path}"})
@@ -333,6 +363,7 @@ def main(argv: list[str]) -> int:
     screenshot_path = log_path.with_name("desktop-screendump.ppm")
     client: QMPClient | None = None
     mouse: VNCClient | None = None
+    pointer: QMPClient | VNCClient | None = None
     try:
         connect_deadline = time.monotonic() + CONNECT_TIMEOUT
         last_error: OSError | None = None
@@ -353,20 +384,31 @@ def main(argv: list[str]) -> int:
         initial_screenshot = client.screenshot(screenshot_path)
         assert_desktop_is_visible(initial_screenshot)
         width, height, _ = initial_screenshot
-        mouse = VNCClient()
-        if mouse.width != width or mouse.height != height:
-            raise RuntimeError(
-                f"VNC/QMP size mismatch: VNC={mouse.width}x{mouse.height}, "
-                f"QMP={width}x{height}"
-            )
-        # Exercise the same RFB pointer path a person uses with QEMU's VNC display.
-        mouse.click(75, 20, width, height)
-        wait_for_log(log_path, "desktop: pointer report", EVENT_TIMEOUT)
-        wait_for_log(log_path, "desktop: applications menu opened", EVENT_TIMEOUT)
+        # First try QMP's documented guest-input event path, using the absolute
+        # coordinate range expected by QEMU. If this display backend does not route
+        # input to the USB tablet, fall back to the real VNC/RFB host-pointer path.
+        pointer = client
+        client.click(75, 20, width, height)
+        try:
+            wait_for_log(log_path, "desktop: pointer report", 1.5)
+            wait_for_log(log_path, "desktop: applications menu opened", 1.5)
+            print("Desktop pointer test used QMP absolute input events.")
+        except TimeoutError:
+            mouse = VNCClient()
+            if mouse.width != width or mouse.height != height:
+                raise RuntimeError(
+                    f"VNC/QMP size mismatch: VNC={mouse.width}x{mouse.height}, "
+                    f"QMP={width}x{height}"
+                )
+            pointer = mouse
+            mouse.click(75, 20, width, height)
+            wait_for_log(log_path, "desktop: pointer report", EVENT_TIMEOUT)
+            wait_for_log(log_path, "desktop: applications menu opened", EVENT_TIMEOUT)
+            print("Desktop pointer test used VNC/RFB absolute input events.")
         menu_screenshot = client.screenshot(screenshot_path)
         if menu_screenshot[2] == initial_screenshot[2]:
             raise RuntimeError("opening Applications did not change the captured desktop")
-        mouse.click(65, 47 + 45, width, height)
+        pointer.click(65, 47 + 45, width, height)
         wait_for_log(log_path, "desktop: terminal window opened", EVENT_TIMEOUT)
         assert_terminal_is_visible(client.screenshot(screenshot_path))
 
@@ -384,9 +426,9 @@ def main(argv: list[str]) -> int:
         wait_for_log(log_path, "desktop: terminal window closed", EVENT_TIMEOUT)
 
         # Files sees the file Terminal just wrote; click the row twice to open it.
-        mouse.click(75, 20, width, height)
+        pointer.click(75, 20, width, height)
         wait_for_log(log_path, "desktop: applications menu opened", EVENT_TIMEOUT)
-        mouse.click(65, 47 + 70, width, height)
+        pointer.click(65, 47 + 70, width, height)
         wait_for_log(log_path, "desktop: file browser opened", EVENT_TIMEOUT)
 
         file_width = min(720, width - 40)
@@ -399,19 +441,19 @@ def main(argv: list[str]) -> int:
             file_y = height - 54 - file_height - 8
         first_row_y = file_y + 30 + 18 + 23
         mouse_file_row_y = first_row_y + 4 * 18 + 9
-        mouse.click(file_x + 100, mouse_file_row_y, width, height)
+        pointer.click(file_x + 100, mouse_file_row_y, width, height)
         wait_for_log(log_path, "desktop: file entry selected by pointer", EVENT_TIMEOUT)
-        mouse.click(file_x + 100, mouse_file_row_y, width, height)
+        pointer.click(file_x + 100, mouse_file_row_y, width, height)
         wait_for_log(log_path, "desktop: text viewer opened: mouse.txt", EVENT_TIMEOUT)
         client.send_key("b")
         wait_for_log(log_path, "desktop: text viewer closed", EVENT_TIMEOUT)
 
         # The taskbar can minimise, restore, and close the File Manager.
-        mouse.click(file_x + file_width - 63, file_y + 16, width, height)
+        pointer.click(file_x + file_width - 63, file_y + 16, width, height)
         wait_for_log(log_path, "desktop: window minimized", EVENT_TIMEOUT)
-        mouse.click(280, 20, width, height)
+        pointer.click(280, 20, width, height)
         wait_for_log(log_path, "desktop: taskbar window focused", EVENT_TIMEOUT)
-        mouse.click(file_x + file_width - 15, file_y + 16, width, height)
+        pointer.click(file_x + file_width - 15, file_y + 16, width, height)
         wait_for_log(log_path, "desktop: window closed", EVENT_TIMEOUT)
         client.send_key("q")
         wait_for_log(log_path, "desktop: returned to shell", EVENT_TIMEOUT)
