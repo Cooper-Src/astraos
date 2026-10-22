@@ -13,8 +13,9 @@
 enum {
     DISPLAY_SURFACE_CAP = 5u,
     DISPLAY_TITLEBAR_HEIGHT = 30u,
-    DISPLAY_PANEL_HEIGHT = 42u,
-    DISPLAY_DOCK_HEIGHT = 54u,
+    /* A conventional Xfce-like top panel and a compact bottom status bar. */
+    DISPLAY_PANEL_HEIGHT = 34u,
+    DISPLAY_BOTTOM_PANEL_HEIGHT = 30u,
     DISPLAY_MIN_WIDTH = 480u,
     DISPLAY_MIN_HEIGHT = 360u,
     DISPLAY_MIN_WINDOW_WIDTH = 260u,
@@ -29,28 +30,31 @@ enum {
     DISPLAY_TEXT_CELL_WIDTH = 8u
 };
 
-#define COLOR_DESKTOP          UINT32_C(0x101b2c)
-#define COLOR_DESKTOP_LEFT     UINT32_C(0x172940)
-#define COLOR_DESKTOP_ACCENT   UINT32_C(0x203651)
-#define COLOR_PANEL            UINT32_C(0x111b2b)
-#define COLOR_PANEL_EDGE       UINT32_C(0x34465f)
-#define COLOR_PANEL_HOVER      UINT32_C(0x23354d)
-#define COLOR_DOCK              UINT32_C(0x111a29)
-#define COLOR_WINDOW            UINT32_C(0x1a2638)
-#define COLOR_WINDOW_EDGE      UINT32_C(0x435570)
-#define COLOR_TITLE_ACTIVE     UINT32_C(0x2c526a)
-#define COLOR_TITLE_IDLE       UINT32_C(0x25344a)
-#define COLOR_TEXT             UINT32_C(0xeaf1fa)
-#define COLOR_MUTED            UINT32_C(0xaab9cc)
-#define COLOR_ACCENT           UINT32_C(0x65e0dc)
-#define COLOR_BLUE              UINT32_C(0x80adff)
-#define COLOR_GREEN             UINT32_C(0x8cdbad)
+/* Greybird-inspired window chrome over an Astra blue desktop. */
+#define COLOR_DESKTOP          UINT32_C(0x1f6fa9)
+#define COLOR_DESKTOP_LEFT     UINT32_C(0x2f80b9)
+#define COLOR_DESKTOP_ACCENT   UINT32_C(0x4f9bcb)
+#define COLOR_DESKTOP_LIGHT    UINT32_C(0x77b8da)
+#define COLOR_PANEL            UINT32_C(0x263744)
+#define COLOR_PANEL_EDGE       UINT32_C(0x506875)
+#define COLOR_PANEL_HOVER      UINT32_C(0x3c5360)
+#define COLOR_BOTTOM_PANEL     UINT32_C(0x22323e)
+#define COLOR_WINDOW           UINT32_C(0xf4f6f7)
+#define COLOR_WINDOW_EDGE      UINT32_C(0x93a7b4)
+#define COLOR_TITLE_ACTIVE     UINT32_C(0x397db6)
+#define COLOR_TITLE_IDLE       UINT32_C(0x6f818d)
+#define COLOR_TEXT             UINT32_C(0x25323a)
+#define COLOR_MUTED            UINT32_C(0x5b6b76)
+#define COLOR_PANEL_TEXT       UINT32_C(0xf3f7fa)
+#define COLOR_ACCENT           UINT32_C(0x82c7ef)
+#define COLOR_BLUE              UINT32_C(0x5d9ed3)
+#define COLOR_GREEN             UINT32_C(0x75ad6a)
 #define COLOR_TERMINAL          UINT32_C(0x0a111b)
 #define COLOR_TERMINAL_TEXT    UINT32_C(0xc3f5d5)
 #define COLOR_WARNING          UINT32_C(0xf2c879)
-#define COLOR_SELECTION        UINT32_C(0x2b5066)
-#define COLOR_CLOSE            UINT32_C(0xe97979)
-#define COLOR_MINIMIZE         UINT32_C(0xe8c16d)
+#define COLOR_SELECTION        UINT32_C(0xd9eefa)
+#define COLOR_CLOSE            UINT32_C(0xcc5b5b)
+#define COLOR_MINIMIZE         UINT32_C(0xe2b65a)
 
 typedef enum AstraDisplayApp {
     DISPLAY_APP_WELCOME = 0,
@@ -171,7 +175,7 @@ static const char *app_title(AstraDisplayApp app) {
         case DISPLAY_APP_FILES:
             return "File Manager";
         case DISPLAY_APP_ABOUT:
-            return "About AstraOS";
+            return "Settings";
         case DISPLAY_APP_VIEWER:
             return "Text Viewer";
         default:
@@ -188,7 +192,7 @@ static const char *app_short_label(AstraDisplayApp app) {
         case DISPLAY_APP_FILES:
             return "Files";
         case DISPLAY_APP_ABOUT:
-            return "About";
+            return "Settings";
         case DISPLAY_APP_VIEWER:
             return "Text";
         default:
@@ -262,14 +266,14 @@ static void place_surface(AstraDisplaySurface *surface) {
     size_t slot = 0u;
 
     if (surface == NULL || g_screen_width <= 40u ||
-        g_screen_height <= DISPLAY_PANEL_HEIGHT + DISPLAY_DOCK_HEIGHT + 24u) {
+        g_screen_height <= DISPLAY_PANEL_HEIGHT + DISPLAY_BOTTOM_PANEL_HEIGHT + 24u) {
         return;
     }
     if (width > g_screen_width - 40u) {
         width = g_screen_width - 40u;
     }
-    if (height > g_screen_height - DISPLAY_PANEL_HEIGHT - DISPLAY_DOCK_HEIGHT - 24u) {
-        height = g_screen_height - DISPLAY_PANEL_HEIGHT - DISPLAY_DOCK_HEIGHT - 24u;
+    if (height > g_screen_height - DISPLAY_PANEL_HEIGHT - DISPLAY_BOTTOM_PANEL_HEIGHT - 24u) {
+        height = g_screen_height - DISPLAY_PANEL_HEIGHT - DISPLAY_BOTTOM_PANEL_HEIGHT - 24u;
     }
     if (width < DISPLAY_MIN_WINDOW_WIDTH || height < DISPLAY_MIN_WINDOW_HEIGHT) {
         return;
@@ -284,13 +288,13 @@ static void place_surface(AstraDisplaySurface *surface) {
     surface->height = height;
     surface->x = (g_screen_width - width) / 2u + (uint32_t)slot * 12u;
     surface->y = DISPLAY_PANEL_HEIGHT + 8u +
-        (g_screen_height - DISPLAY_PANEL_HEIGHT - DISPLAY_DOCK_HEIGHT - height - 16u) / 2u
+        (g_screen_height - DISPLAY_PANEL_HEIGHT - DISPLAY_BOTTOM_PANEL_HEIGHT - height - 16u) / 2u
         + (uint32_t)slot * 10u;
     if (surface->x > g_screen_width - width - 8u) {
         surface->x = g_screen_width - width - 8u;
     }
-    if (surface->y > g_screen_height - DISPLAY_DOCK_HEIGHT - height - 8u) {
-        surface->y = g_screen_height - DISPLAY_DOCK_HEIGHT - height - 8u;
+    if (surface->y > g_screen_height - DISPLAY_BOTTOM_PANEL_HEIGHT - height - 8u) {
+        surface->y = g_screen_height - DISPLAY_BOTTOM_PANEL_HEIGHT - height - 8u;
     }
     surface->restore_x = surface->x;
     surface->restore_y = surface->y;
@@ -413,7 +417,7 @@ static void toggle_maximize_surface(AstraDisplaySurface *surface) {
         surface->y = DISPLAY_PANEL_HEIGHT + 6u;
         surface->width = g_screen_width - 20u;
         surface->height = g_screen_height - DISPLAY_PANEL_HEIGHT -
-            DISPLAY_DOCK_HEIGHT - 12u;
+            DISPLAY_BOTTOM_PANEL_HEIGHT - 12u;
         surface->maximized = true;
     }
     focus_surface(surface);
@@ -438,24 +442,30 @@ static void draw_desktop_icon(
     astra_framebuffer_fill_rect(x, y, 42u, 42u, COLOR_WINDOW_EDGE);
     astra_framebuffer_fill_rect(x + 2u, y + 2u, 38u, 38u, color);
     draw_text(x + 17u, y + 14u, letter, COLOR_PANEL);
-    draw_text(x - 3u, y + 49u, label, COLOR_TEXT);
+    draw_text(x - 3u, y + 49u, label, COLOR_PANEL_TEXT);
+}
+
+static void draw_panel_indicator(uint32_t x, const char *label, uint32_t color) {
+    astra_framebuffer_fill_rect(x, 11u, 10u, 10u, color);
+    astra_framebuffer_fill_rect(x + 2u, 13u, 6u, 6u, COLOR_PANEL);
+    draw_text(x + 15u, 11u, label, COLOR_PANEL_TEXT);
 }
 
 static void render_panel(void) {
-    uint32_t right_edge = g_screen_width > 126u ? g_screen_width - 126u : 0u;
-    uint32_t task_x = 152u;
-    const uint32_t task_width = 96u;
+    uint32_t right_edge = g_screen_width > 184u ? g_screen_width - 184u : 0u;
+    uint32_t task_x = 142u;
+    const uint32_t task_width = 104u;
 
     astra_framebuffer_fill_rect(0u, 0u, g_screen_width, DISPLAY_PANEL_HEIGHT, COLOR_PANEL);
     astra_framebuffer_fill_rect(
         0u, DISPLAY_PANEL_HEIGHT - 2u, g_screen_width, 2u, COLOR_PANEL_EDGE
     );
 
-    astra_framebuffer_fill_rect(10u, 7u, 27u, 27u, COLOR_ACCENT);
-    astra_framebuffer_fill_rect(15u, 12u, 17u, 17u, COLOR_PANEL);
-    draw_text(20u, 17u, "A", COLOR_ACCENT);
-    astra_framebuffer_fill_rect(43u, 5u, 100u, 32u, COLOR_PANEL_HOVER);
-    draw_text(52u, 17u, "Applications", COLOR_TEXT);
+    astra_framebuffer_fill_rect(8u, 5u, 24u, 24u, COLOR_ACCENT);
+    astra_framebuffer_fill_rect(13u, 10u, 14u, 14u, COLOR_PANEL);
+    draw_text(17u, 12u, "A", COLOR_ACCENT);
+    astra_framebuffer_fill_rect(38u, 4u, 98u, 26u, COLOR_PANEL_HOVER);
+    draw_text(47u, 11u, "Applications", COLOR_PANEL_TEXT);
 
     for (size_t index = 0u; index < DISPLAY_SURFACE_CAP; index++) {
         const AstraDisplaySurface *surface = &g_surfaces[index];
@@ -473,7 +483,7 @@ static void render_panel(void) {
             task_x, 5u, 3u, 32u,
             surface->focused ? COLOR_ACCENT : COLOR_PANEL_EDGE
         );
-        draw_text(task_x + 9u, 17u, app_short_label(surface->app), COLOR_TEXT);
+        draw_text(task_x + 9u, 11u, app_short_label(surface->app), COLOR_PANEL_TEXT);
         if (surface->minimized) {
             astra_framebuffer_fill_rect(
                 task_x + task_width - 14u, 18u, 5u, 5u, COLOR_MINIMIZE
@@ -486,13 +496,19 @@ static void render_panel(void) {
         task_x += task_width;
     }
 
-    if (g_screen_width > 320u) {
-        draw_text(g_screen_width - 116u, 17u, "WS 1 | ARM64", COLOR_MUTED);
+    if (g_screen_width > 540u) {
+        const uint32_t indicator_x = g_screen_width - 169u;
+
+        draw_text(indicator_x, 11u, "1", COLOR_ACCENT);
+        astra_framebuffer_fill_rect(indicator_x + 14u, 8u, 22u, 18u, COLOR_PANEL_HOVER);
+        draw_text(indicator_x + 21u, 11u, "2", COLOR_MUTED);
+        draw_panel_indicator(indicator_x + 44u, "NET", COLOR_GREEN);
+        draw_panel_indicator(indicator_x + 98u, "SYS", COLOR_BLUE);
     }
 }
 
 static void render_desktop_background(void) {
-    uint32_t dock_y = g_screen_height - DISPLAY_DOCK_HEIGHT;
+    uint32_t bottom_y = g_screen_height - DISPLAY_BOTTOM_PANEL_HEIGHT;
     uint32_t middle_width = g_screen_width / 3u;
 
     astra_framebuffer_fill_rect(
@@ -500,45 +516,46 @@ static void render_desktop_background(void) {
     );
     astra_framebuffer_fill_rect(
         0u, DISPLAY_PANEL_HEIGHT, middle_width,
-        dock_y - DISPLAY_PANEL_HEIGHT, COLOR_DESKTOP_LEFT
+        bottom_y - DISPLAY_PANEL_HEIGHT, COLOR_DESKTOP_LEFT
     );
     astra_framebuffer_fill_rect(
         middle_width, DISPLAY_PANEL_HEIGHT, middle_width,
-        dock_y - DISPLAY_PANEL_HEIGHT, COLOR_DESKTOP_ACCENT
+        bottom_y - DISPLAY_PANEL_HEIGHT, COLOR_DESKTOP_ACCENT
     );
     astra_framebuffer_fill_rect(
         g_screen_width - g_screen_width / 5u, DISPLAY_PANEL_HEIGHT,
-        g_screen_width / 5u, dock_y - DISPLAY_PANEL_HEIGHT, COLOR_DESKTOP_LEFT
+        g_screen_width / 5u, bottom_y - DISPLAY_PANEL_HEIGHT, COLOR_DESKTOP_LEFT
     );
 
-    /* The subdued geometric wallpaper is deliberately drawn with bounded rectangles. */
+    /* Simple bounded shapes keep the blue desktop distinct without a bitmap asset. */
     astra_framebuffer_fill_rect(
-        g_screen_width / 2u, DISPLAY_PANEL_HEIGHT + 28u,
-        g_screen_width / 5u, 3u, COLOR_WINDOW_EDGE
+        g_screen_width / 2u - 24u, DISPLAY_PANEL_HEIGHT + 28u,
+        g_screen_width / 3u, 4u, COLOR_DESKTOP_LIGHT
     );
     astra_framebuffer_fill_rect(
-        g_screen_width / 2u + 18u, DISPLAY_PANEL_HEIGHT + 45u,
-        g_screen_width / 7u, 3u, COLOR_PANEL_EDGE
+        g_screen_width / 2u + 28u, DISPLAY_PANEL_HEIGHT + 51u,
+        g_screen_width / 5u, 4u, COLOR_DESKTOP_LIGHT
     );
     render_panel();
 
     draw_desktop_icon(25u, 66u, COLOR_BLUE, "T", "Terminal");
-    draw_desktop_icon(25u, 134u, COLOR_GREEN, "F", "Files");
-    draw_desktop_icon(25u, 202u, COLOR_ACCENT, "A", "About");
+    draw_desktop_icon(25u, 134u, COLOR_GREEN, "F", "Home");
+    draw_desktop_icon(25u, 202u, COLOR_ACCENT, "S", "Settings");
 
-    astra_framebuffer_fill_rect(0u, dock_y, g_screen_width, DISPLAY_DOCK_HEIGHT, COLOR_DOCK);
-    astra_framebuffer_fill_rect(0u, dock_y, g_screen_width, 2u, COLOR_PANEL_EDGE);
+    astra_framebuffer_fill_rect(
+        0u, bottom_y, g_screen_width, DISPLAY_BOTTOM_PANEL_HEIGHT, COLOR_BOTTOM_PANEL
+    );
+    astra_framebuffer_fill_rect(0u, bottom_y, g_screen_width, 2u, COLOR_PANEL_EDGE);
 
     if (g_screen_width > 660u) {
-        draw_text(14u, dock_y + 13u, "T Terminal   F Files   A About", COLOR_MUTED);
+        draw_text(14u, bottom_y + 10u, "T Terminal   F Home   S Settings", COLOR_PANEL_TEXT);
         draw_text(
-            14u, dock_y + 31u, "M Menu  W Switch window  C Close  N Minimise  X Maximise",
+            310u, bottom_y + 10u, "M Menu  W Switch  C Close  N Minimise  X Maximise",
             COLOR_MUTED
         );
-        draw_text(g_screen_width - 204u, dock_y + 22u, "AstraOS Desktop", COLOR_TEXT);
+        draw_text(g_screen_width - 172u, bottom_y + 10u, "AstraOS Xfce shell", COLOR_PANEL_TEXT);
     } else {
-        draw_text(12u, dock_y + 13u, "T Terminal  F Files  A About", COLOR_MUTED);
-        draw_text(12u, dock_y + 31u, "M Menu  C Close  N Min  X Max  Q Shell", COLOR_MUTED);
+        draw_text(12u, bottom_y + 10u, "T Term  F Home  S Set  M Menu  Q Shell", COLOR_PANEL_TEXT);
     }
 }
 
@@ -1198,13 +1215,14 @@ static void render_window_content(const AstraDisplaySurface *surface) {
 
     switch (surface->app) {
         case DISPLAY_APP_WELCOME:
-            draw_text(left, top, "Welcome to AstraOS", COLOR_ACCENT);
-            draw_text(left, top + 31u, "A lightweight AArch64 desktop environment.", COLOR_TEXT);
-            draw_text(left, top + 53u, "A panel, task list, dock and window manager are active.", COLOR_TEXT);
-            draw_text(left, top + 88u, "Open an essential tool:", COLOR_MUTED);
-            draw_text(left + 10u, top + 116u, "T  Terminal and shell commands", COLOR_TERMINAL_TEXT);
-            draw_text(left + 10u, top + 140u, "F  File Manager and text viewer", COLOR_GREEN);
-            draw_text(left + 10u, top + 164u, "M  Applications menu", COLOR_BLUE);
+            draw_text(left, top, "Welcome to AstraOS Desktop", COLOR_TITLE_ACTIVE);
+            draw_text(left, top + 31u, "An Xfce-inspired shell for the AArch64 framebuffer.", COLOR_TEXT);
+            draw_text(left, top + 53u, "The panel, workspace pager, task list and window manager are active.", COLOR_TEXT);
+            draw_text(left, top + 88u, "Start an application:", COLOR_MUTED);
+            draw_text(left + 10u, top + 116u, "T  Terminal and shell commands", COLOR_TITLE_ACTIVE);
+            draw_text(left + 10u, top + 140u, "F  Home folder and text viewer", COLOR_GREEN);
+            draw_text(left + 10u, top + 164u, "S  System settings", COLOR_BLUE);
+            draw_text(left + 10u, top + 188u, "M  Applications menu", COLOR_TITLE_ACTIVE);
             draw_text(left, surface->y + surface->height - 42u, "C close  N minimise  X maximise  W switch windows", COLOR_WARNING);
             break;
         case DISPLAY_APP_TERMINAL:
@@ -1214,13 +1232,13 @@ static void render_window_content(const AstraDisplaySurface *surface) {
             render_files(surface);
             break;
         case DISPLAY_APP_ABOUT:
-            draw_text(left, top, "AstraOS", COLOR_ACCENT);
-            draw_text(left, top + 31u, "Experimental freestanding AArch64 OS", COLOR_TEXT);
-            draw_text(left, top + 55u, "Software-rendered GOP framebuffer desktop", COLOR_TEXT);
-            draw_text(left, top + 79u, "Window focus, tasks and maximise/minimise controls", COLOR_TEXT);
-            draw_text(left, top + 103u, "A shared fixed-size RAM filesystem backs Files and Terminal", COLOR_TEXT);
-            draw_text(left, top + 139u, "No mouse / native USB HID input yet.", COLOR_WARNING);
-            draw_text(left, top + 163u, "Windows are kernel-owned surfaces, not isolated processes.", COLOR_MUTED);
+            draw_text(left, top, "AstraOS Settings", COLOR_TITLE_ACTIVE);
+            draw_text(left, top + 31u, "Desktop: Astra Blue / Greybird-inspired chrome", COLOR_TEXT);
+            draw_text(left, top + 55u, "Panel: Applications, task buttons, pager and status indicators", COLOR_TEXT);
+            draw_text(left, top + 79u, "Display: GOP framebuffer software compositor", COLOR_TEXT);
+            draw_text(left, top + 103u, "Storage: shared fixed-size RAM filesystem", COLOR_TEXT);
+            draw_text(left, top + 139u, "Input: UEFI keyboard compatibility path", COLOR_WARNING);
+            draw_text(left, top + 163u, "Mouse, persistent preferences and native HID are future work.", COLOR_MUTED);
             break;
         case DISPLAY_APP_VIEWER:
             render_viewer(surface);
@@ -1258,7 +1276,7 @@ static void render_surface(const AstraDisplaySurface *surface) {
     );
     draw_text(
         surface->x + 14u, surface->y + 11u,
-        app_title(surface->app), COLOR_TEXT
+        app_title(surface->app), COLOR_PANEL_TEXT
     );
 
     astra_framebuffer_fill_rect(right - 23u, surface->y + 9u, 16u, 14u, COLOR_CLOSE);
@@ -1273,18 +1291,20 @@ static void render_surface(const AstraDisplaySurface *surface) {
 static void render_applications_menu(void) {
     const uint32_t x = 12u;
     const uint32_t y = DISPLAY_PANEL_HEIGHT + 5u;
-    const uint32_t width = 220u;
-    const uint32_t height = 150u;
+    const uint32_t width = 244u;
+    const uint32_t height = 180u;
 
     astra_framebuffer_fill_rect(x + 4u, y + 4u, width, height, COLOR_PANEL);
     astra_framebuffer_fill_rect(x, y, width, height, COLOR_WINDOW_EDGE);
     astra_framebuffer_fill_rect(x + 2u, y + 2u, width - 4u, height - 4u, COLOR_PANEL);
-    draw_text(x + 12u, y + 12u, "AstraOS Applications", COLOR_ACCENT);
+    draw_text(x + 12u, y + 12u, "Applications", COLOR_ACCENT);
     astra_framebuffer_fill_rect(x + 8u, y + 31u, width - 16u, 1u, COLOR_PANEL_EDGE);
-    draw_text(x + 14u, y + 43u, "T  Terminal", COLOR_TEXT);
-    draw_text(x + 14u, y + 67u, "F  File Manager", COLOR_TEXT);
-    draw_text(x + 14u, y + 91u, "A  About AstraOS", COLOR_TEXT);
-    draw_text(x + 14u, y + 119u, "Q  Return to shell", COLOR_WARNING);
+    draw_text(x + 14u, y + 43u, "Accessories", COLOR_MUTED);
+    draw_text(x + 20u, y + 65u, "T  Terminal", COLOR_PANEL_TEXT);
+    draw_text(x + 20u, y + 89u, "F  Home Folder", COLOR_PANEL_TEXT);
+    draw_text(x + 14u, y + 117u, "System", COLOR_MUTED);
+    draw_text(x + 20u, y + 139u, "S  Settings", COLOR_PANEL_TEXT);
+    draw_text(x + 20u, y + 163u, "Q  Log Out to Shell", COLOR_WARNING);
 }
 
 static void render_desktop(void) {
@@ -1349,7 +1369,13 @@ static bool handle_menu_key(uint8_t key) {
     if (key == (uint8_t)'a' || key == (uint8_t)'A' || key == (uint8_t)'3') {
         g_menu_open = false;
         open_surface(DISPLAY_APP_ABOUT);
-        astra_uart_puts("desktop: about window focused\n");
+        astra_uart_puts("desktop: settings window focused\n");
+        return true;
+    }
+    if (key == (uint8_t)'s' || key == (uint8_t)'S') {
+        g_menu_open = false;
+        open_surface(DISPLAY_APP_ABOUT);
+        astra_uart_puts("desktop: settings window focused\n");
         return true;
     }
     if (key == (uint8_t)'q' || key == (uint8_t)'Q') {
@@ -1404,7 +1430,7 @@ bool astra_display_server_run(void) {
     render_desktop();
     astra_uart_puts("ASTRAOS_DISPLAY_SERVER_READY\n");
     astra_uart_puts(
-        "Desktop: T terminal, F files, A about, M menu, W switch window, "
+        "Desktop: T terminal, F home, S settings, M menu, W switch window, "
         "C close, N minimise, X maximise, Q shell.\n"
     );
 
@@ -1459,9 +1485,11 @@ bool astra_display_server_run(void) {
             case 'a':
             case 'A':
             case '3':
+            case 's':
+            case 'S':
                 g_menu_open = false;
                 open_surface(DISPLAY_APP_ABOUT);
-                astra_uart_puts("desktop: about window focused\n");
+                astra_uart_puts("desktop: settings window focused\n");
                 break;
             case 'm':
             case 'M':
