@@ -1233,8 +1233,8 @@ static void render_window_content(const AstraDisplaySurface *surface) {
             draw_text(left, top + 55u, "Software-rendered GOP framebuffer desktop", COLOR_TEXT);
             draw_text(left, top + 79u, "Window focus, tasks and maximise/minimise controls", COLOR_TEXT);
             draw_text(left, top + 103u, "A shared fixed-size RAM filesystem backs Files and Terminal", COLOR_TEXT);
-            draw_text(left, top + 139u, "No mouse / native USB HID input yet.", COLOR_WARNING);
-            draw_text(left, top + 163u, "Windows are kernel-owned surfaces, not isolated processes.", COLOR_MUTED);
+            draw_text(left, top + 139u, "Pointer uses available UEFI protocols.", COLOR_WARNING);
+            draw_text(left, top + 163u, "Native USB/HID and userspace processes are not implemented.", COLOR_MUTED);
             break;
         case DISPLAY_APP_VIEWER:
             render_viewer(surface);
