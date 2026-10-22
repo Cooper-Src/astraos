@@ -6,11 +6,33 @@
 
 #include "boot_info.h"
 
-/* Selects firmware keyboard input when requested, otherwise a detected UART. */
+typedef enum AstraInputEventType {
+    ASTRA_INPUT_EVENT_NONE = 0,
+    ASTRA_INPUT_EVENT_KEY,
+    ASTRA_INPUT_EVENT_POINTER
+} AstraInputEventType;
+
+typedef struct AstraInputEvent {
+    AstraInputEventType type;
+    uint8_t key;
+    int32_t pointer_dx;
+    int32_t pointer_dy;
+    int32_t pointer_dz;
+    bool left_button;
+    bool right_button;
+} AstraInputEvent;
+
+/* Selects firmware input when requested, otherwise the detected serial console. */
 bool astra_input_initialize(const AstraBootInfo *boot_info, bool serial_ready);
 
-/* Blocks until one byte is available. False means the active input path failed. */
+/* Blocks until keyboard or pointer input arrives. Output is caller-owned. */
+bool astra_input_read_event(AstraInputEvent *event_out);
+
+/* Blocks until a key arrives; pointer events are ignored for shell compatibility. */
 bool astra_input_read_byte(uint8_t *byte_out);
+
+/* Reports whether a usable firmware pointer protocol was handed off by UEFI. */
+bool astra_input_pointer_available(void);
 
 /* Converts a UEFI Unicode key to the shell's ASCII input stream. */
 bool astra_input_translate_key(uint16_t unicode_char, uint8_t *byte_out);
