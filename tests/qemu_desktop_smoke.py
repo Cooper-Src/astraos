@@ -88,42 +88,23 @@ class QMPClient:
         self.execute("human-monitor-command", {"command-line": f"sendkey {key}"})
 
     def move_pointer_to(self, x: int, y: int, width: int, height: int) -> None:
-        """Move the USB relative mouse; UEFI Simple Pointer reports movement in device units."""
+        """Send absolute pointer coordinates to the explicitly selected QEMU display."""
         if width < 2 or height < 2:
             raise ValueError("framebuffer dimensions are too small for pointer input")
         x = max(0, min(x, width - 1))
         y = max(0, min(y, height - 1))
-        if self._pointer_x is None or self._pointer_y is None:
-            self._pointer_x = width // 2
-            self._pointer_y = height // 2
-        delta_x = x - self._pointer_x
-        delta_y = y - self._pointer_y
-        # A boot-protocol USB mouse reports signed 8-bit motion per report. Keep
-        # injected reports small, like a real mouse, instead of sending one large
-        # impossible movement and relying on the emulated HID device to clamp it.
-        steps = max(
-            1,
-            (max(abs(delta_x), abs(delta_y)) + 39) // 40,
+        absolute_x = x * 0x7FFF // (width - 1)
+        absolute_y = y * 0x7FFF // (height - 1)
+        self.execute(
+            "input-send-event",
+            {
+                "device": "video0",
+                "events": [
+                    {"type": "abs", "data": {"axis": "x", "value": absolute_x}},
+                    {"type": "abs", "data": {"axis": "y", "value": absolute_y}},
+                ],
+            },
         )
-        for step in range(steps):
-            next_x = int(delta_x * (step + 1) / steps)
-            prev_x = int(delta_x * step / steps)
-            next_y = int(delta_y * (step + 1) / steps)
-            prev_y = int(delta_y * step / steps)
-            relative_x = int((next_x - prev_x) / 2)
-            relative_y = int((next_y - prev_y) / 2)
-            if relative_x == 0 and relative_y == 0:
-                continue
-            self.execute(
-                "input-send-event",
-                {
-                    "events": [
-                        {"type": "rel", "data": {"axis": "x", "value": relative_x}},
-                        {"type": "rel", "data": {"axis": "y", "value": relative_y}},
-                    ]
-                },
-            )
-            time.sleep(0.02)
         self._pointer_x = x
         self._pointer_y = y
         time.sleep(0.2)
@@ -131,7 +112,10 @@ class QMPClient:
     def mouse_button(self, down: bool) -> None:
         self.execute(
             "input-send-event",
-            {"events": [{"type": "btn", "data": {"button": "left", "down": down}}]},
+            {
+                "device": "video0",
+                "events": [{"type": "btn", "data": {"button": "left", "down": down}}],
+            },
         )
         time.sleep(0.15)
 
@@ -139,7 +123,6 @@ class QMPClient:
         self.move_pointer_to(x, y, width, height)
         self.mouse_button(True)
         self.mouse_button(False)
-
 
     def hmp_click(self, x: int, y: int, width: int, height: int) -> None:
         """Use QEMU's active-mouse monitor API as a second independent input route."""
