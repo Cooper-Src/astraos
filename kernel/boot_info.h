@@ -4,7 +4,7 @@
 #include <stdint.h>
 
 #define ASTRA_BOOT_INFO_MAGIC UINT64_C(0x4153545241424f4f)
-#define ASTRA_BOOT_INFO_VERSION UINT64_C(6)
+#define ASTRA_BOOT_INFO_VERSION UINT64_C(7)
 #define ASTRA_BOOT_MEMORY_MAP_CAP_BYTES (UINT64_C(16384) * UINT64_C(8))
 
 #define ASTRA_BOOT_FLAG_BOOT_SERVICES_ACTIVE (UINT64_C(1) << 0u)
@@ -94,6 +94,8 @@ typedef struct AstraBootInfo {
     uint64_t firmware_daif;
     /* Borrowed UEFI Simple Pointer Protocol; valid only while Boot Services are active. */
     AstraFirmwareSimplePointerProtocol *firmware_pointer_protocol;
+    /* Periodic timer event for UEFI firmware that does not signal pointer WaitForInput. */
+    void *firmware_pointer_poll_event;
 } AstraBootInfo;
 
 /* Called by the AArch64 entry assembly after the stack is installed. */
