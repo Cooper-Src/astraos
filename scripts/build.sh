@@ -73,6 +73,7 @@ KERNEL_FLAGS=(
     -ffunction-sections -fdata-sections -mgeneral-regs-only -mcmodel=small
     -Wall -Wextra -Wpedantic -Wshadow -Wconversion -Wformat=2
     -Wstrict-prototypes -Wmissing-prototypes -Wwrite-strings -Wcast-qual -Wundef -Wvla -Werror
+    -DASTRAOS_KERNEL_BUILD
     -I"$ROOT/kernel"
 )
 
