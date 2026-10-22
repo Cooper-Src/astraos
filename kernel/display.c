@@ -928,7 +928,9 @@ static void files_open_selected(void) {
     g_viewer_scroll = 0u;
     g_files_last_click_index = SIZE_MAX;
     open_surface(DISPLAY_APP_VIEWER);
-    astra_uart_puts("desktop: text viewer opened\n");
+    astra_uart_puts("desktop: text viewer opened: ");
+    astra_uart_puts(target);
+    astra_uart_puts("\n");
 }
 
 static void files_parent_directory(void) {
