@@ -86,7 +86,7 @@ class QMPClient:
 class QMPPointer:
     """Inject pointer input through QMP instead of relying on VNC client semantics."""
 
-    ABS_MAX = 0x7FFF
+    ABS_MAX = 0x7FFFF
 
     def __init__(self, client: QMPClient, width: int, height: int) -> None:
         self._client = client
@@ -111,7 +111,7 @@ class QMPPointer:
                     "type": "btn",
                     "data": {"button": name, "down": after},
                 })
-        self._client.execute("input-send-event", {"events": events})
+        self._client.execute("input-send-event", {"device": "desktop-display", "head": 0, "events": events})
         self._buttons = buttons
 
 def read_log(path: Path) -> str:
