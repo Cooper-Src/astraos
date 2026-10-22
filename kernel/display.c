@@ -95,6 +95,7 @@ static bool g_menu_open;
 static uint32_t g_mouse_x;
 static uint32_t g_mouse_y;
 static bool g_mouse_left_down;
+static bool g_logged_pointer_event = false;
 static int g_drag_surface_index = -1;
 static uint32_t g_pointer_debug_reports;
 static uint32_t g_input_event_counter;
@@ -1653,6 +1654,10 @@ static bool handle_pointer_event(const AstraInputEvent *event) {
     if (event == NULL || event->kind != ASTRA_INPUT_EVENT_POINTER) {
         return false;
     }
+    if (!g_logged_pointer_event) {
+        g_logged_pointer_event = true;
+        astra_uart_puts("desktop: pointer event received\n");
+    }
     if (event->absolute) {
         g_mouse_x = scale_absolute_axis(
             event->absolute_x, event->min_x, event->max_x, g_screen_width
@@ -1802,6 +1807,7 @@ bool astra_display_server_run(void) {
     g_mouse_y = g_screen_height / 2u;
     g_mouse_left_down = false;
     g_drag_surface_index = -1;
+    g_logged_pointer_event = false;
     g_pointer_debug_reports = 0u;
     g_input_event_counter = 0u;
     g_files_last_click_event = 0u;
