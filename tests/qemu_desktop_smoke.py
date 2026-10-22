@@ -82,16 +82,18 @@ class QMPClient:
         self.execute("human-monitor-command", {"command-line": f"sendkey {key}"})
 
     def send_pointer_motion(self, dx: int, dy: int) -> None:
-        events = [
-            {"type": "rel", "data": {"axis": "x", "value": dx}},
-            {"type": "rel", "data": {"axis": "y", "value": dy}},
-        ]
-        self.execute("input-send-event", {"events": events})
+        # HMP mouse commands target QEMU's selected mouse device. This matters
+        # for headless runs where QMP input-send-event lacks a display seat.
+        self.execute(
+            "human-monitor-command",
+            {"command-line": f"mouse_move {dx} {dy}"},
+        )
 
     def send_mouse_button(self, down: bool) -> None:
+        # HMP button state is a bitmask: 1 = left, 0 = released.
         self.execute(
-            "input-send-event",
-            {"events": [{"type": "btn", "data": {"button": "left", "down": down}}]},
+            "human-monitor-command",
+            {"command-line": f"mouse_button {1 if down else 0}"},
         )
 
     def click(self) -> None:
@@ -212,6 +214,10 @@ def main(argv: list[str]) -> int:
 
         wait_for_log(log_path, "ASTRAOS_DISPLAY_SERVER_READY", BOOT_TIMEOUT)
         wait_for_log(log_path, "ASTRAOS_POINTER_AVAILABLE", EVENT_TIMEOUT)
+        mice = client.execute("query-mice")
+        print(f"QEMU mouse devices: {mice!r}")
+        if not mice:
+            raise RuntimeError("QEMU registered no input mouse device")
         verify_screen_capture(client, log_path.with_name("desktop-screen.ppm"))
 
         # QEMU starts the pointer at the centre. Move to the top-left corner,
