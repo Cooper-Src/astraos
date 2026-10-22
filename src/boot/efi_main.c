@@ -238,6 +238,10 @@ static EFI_GUID g_graphics_output_guid = {
     0x9042a9deu, 0x23dcu, 0x4a38u,
     {0x96u, 0xfbu, 0x7au, 0xdeu, 0xd0u, 0x80u, 0x51u, 0x6au}
 };
+static EFI_GUID g_simple_pointer_guid = {
+    0x31878c87u, 0x0b75u, 0x11d5u,
+    {0x9au, 0x4fu, 0x00u, 0x90u, 0x27u, 0x3fu, 0xc1u, 0x4du}
+};
 static const EFI_GUID g_dtb_table_guid = {
     0xb1b621d5u, 0xf19cu, 0x41a5u,
     {0x83u, 0x0bu, 0xd9u, 0x15u, 0x2cu, 0x69u, 0xaau, 0xe0u}
@@ -1014,6 +1018,42 @@ static void capture_framebuffer(EFI_BOOT_SERVICES *boot_services, AstraBootInfo 
     boot_info->framebuffer_reserved_mask = info->PixelInformation.ReservedMask;
 }
 
+/*
+ * Capture the UEFI Simple Pointer protocol for the optional desktop. The
+ * protocol is borrowed and may only be called while Boot Services remain live.
+ */
+static void capture_firmware_pointer(
+    EFI_BOOT_SERVICES *boot_services,
+    AstraBootInfo *boot_info
+) {
+    EFI_STATUS status = EFI_UNSUPPORTED;
+    void *interface = NULL;
+    AstraFirmwareSimplePointerProtocol *pointer = NULL;
+
+    if (boot_info == NULL) {
+        return;
+    }
+    boot_info->firmware_pointer_protocol = NULL;
+    if (boot_services == NULL || boot_services->LocateProtocol == NULL) {
+        return;
+    }
+
+    status = boot_services->LocateProtocol(&g_simple_pointer_guid, NULL, &interface);
+    if (status != EFI_SUCCESS || interface == NULL) {
+        loader_out(L"UEFI relative mouse not found; keyboard controls remain available.\\r\\n");
+        return;
+    }
+
+    pointer = (AstraFirmwareSimplePointerProtocol *)interface;
+    if (pointer->get_state == NULL || pointer->wait_for_input == NULL) {
+        loader_out(L"UEFI relative mouse protocol is incomplete; mouse disabled.\\r\\n");
+        return;
+    }
+
+    boot_info->firmware_pointer_protocol = pointer;
+    loader_out(L"UEFI relative mouse detected.\\r\\n");
+}
+
 static void stop_forever(void) {
     for (;;) {
         __asm__ volatile("wfe");
@@ -1110,6 +1150,7 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *system_table) {
     g_boot_info.firmware_exception_level = 0u;
     g_boot_info.firmware_exception_vector = 0u;
     g_boot_info.firmware_daif = 0u;
+    g_boot_info.firmware_pointer_protocol = NULL;
 
     if (keyboard_console_mode_requested(image, system_table)) {
         if (configure_firmware_keyboard_console(&g_boot_info, system_table)) {
@@ -1119,6 +1160,7 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *system_table) {
             );
             if (desktop_mode_requested(image, system_table)) {
                 g_boot_info.flags |= ASTRA_BOOT_FLAG_DESKTOP_MODE;
+                capture_firmware_pointer(boot_services, &g_boot_info);
                 loader_out(L"Graphical desktop mode enabled.\r\n");
             }
         } else {
