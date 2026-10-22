@@ -338,20 +338,85 @@ bool astra_input_read_event(AstraInputEvent *event_out) {
         }
 
         /*
-         * Prefer Simple Pointer before Absolute Pointer. A UEFI implementation
-         * may publish both protocols for one USB tablet, but only Simple Pointer
-         * reliably reports mouse buttons. Checking Absolute Pointer first can
-         * consume each update and starve the button-capable protocol.
+         * Poll both UEFI protocols before returning. Firmware can expose both
+         * interfaces for the same USB tablet; Absolute Pointer supplies screen
+         * coordinates while Simple Pointer is often the only reliable source
+         * of mouse-button transitions. Returning on the first successful
+         * GetState() can consume movement and starve the button-capable path.
          */
-        if (g_simple_pointer != NULL) {
+        {
             AstraFirmwareSimplePointerState simple_state;
+            AstraFirmwareAbsolutePointerState absolute_state;
+            const AstraFirmwareAbsolutePointerMode *mode = NULL;
+            bool simple_ready = false;
+            bool absolute_ready = false;
+            uint64_t simple_status = ASTRA_INPUT_EFI_UNSUPPORTED;
+            uint64_t absolute_status = ASTRA_INPUT_EFI_UNSUPPORTED;
+
             simple_state.relative_x = 0;
             simple_state.relative_y = 0;
             simple_state.relative_z = 0;
             simple_state.left_button = 0u;
             simple_state.right_button = 0u;
-            status = firmware_read_simple_pointer(&simple_state);
-            if (status == ASTRA_INPUT_EFI_SUCCESS) {
+            if (g_simple_pointer != NULL) {
+                simple_status = firmware_read_simple_pointer(&simple_state);
+                simple_ready = simple_status == ASTRA_INPUT_EFI_SUCCESS;
+                if (simple_status != ASTRA_INPUT_EFI_NOT_READY &&
+                    simple_status != ASTRA_INPUT_EFI_SUCCESS &&
+                    simple_status != ASTRA_INPUT_EFI_UNSUPPORTED) {
+                    g_simple_pointer = NULL;
+                    astra_uart_puts("desktop: Simple Pointer disabled after device error\n");
+                    simple_ready = false;
+                }
+            }
+
+            absolute_state.current_x = 0u;
+            absolute_state.current_y = 0u;
+            absolute_state.current_z = 0u;
+            absolute_state.active_buttons = 0u;
+            if (g_absolute_pointer != NULL) {
+                mode = g_absolute_pointer->mode;
+                absolute_status = firmware_read_absolute_pointer(&absolute_state);
+                absolute_ready = absolute_status == ASTRA_INPUT_EFI_SUCCESS &&
+                    mode != NULL;
+                if (absolute_status != ASTRA_INPUT_EFI_NOT_READY &&
+                    absolute_status != ASTRA_INPUT_EFI_SUCCESS &&
+                    absolute_status != ASTRA_INPUT_EFI_UNSUPPORTED) {
+                    g_absolute_pointer = NULL;
+                    astra_uart_puts("desktop: Absolute Pointer disabled after device error\n");
+                    absolute_ready = false;
+                }
+            }
+
+            if (absolute_ready) {
+                event_out->kind = ASTRA_INPUT_EVENT_POINTER;
+                event_out->absolute = true;
+                event_out->absolute_x = absolute_state.current_x;
+                event_out->absolute_y = absolute_state.current_y;
+                event_out->min_x = mode->min_x;
+                event_out->max_x = mode->max_x;
+                event_out->min_y = mode->min_y;
+                event_out->max_y = mode->max_y;
+                event_out->left_button_down = simple_ready ?
+                    simple_state.left_button != 0u :
+                    (absolute_state.active_buttons & UINT32_C(1)) != 0u;
+                event_out->right_button_down = simple_ready ?
+                    simple_state.right_button != 0u :
+                    (absolute_state.active_buttons & UINT32_C(2)) != 0u;
+                if (!g_logged_pointer_state) {
+                    g_logged_pointer_state = true;
+                    astra_uart_puts("desktop: UEFI Absolute Pointer event received x=");
+                    astra_uart_put_u32((uint32_t)absolute_state.current_x);
+                    astra_uart_puts(" y=");
+                    astra_uart_put_u32((uint32_t)absolute_state.current_y);
+                    astra_uart_puts(" left=");
+                    astra_uart_put_u32(event_out->left_button_down ? 1u : 0u);
+                    astra_uart_puts("\n");
+                }
+                return true;
+            }
+
+            if (simple_ready) {
                 event_out->kind = ASTRA_INPUT_EVENT_POINTER;
                 event_out->delta_x = simple_state.relative_x;
                 event_out->delta_y = simple_state.relative_y;
@@ -368,52 +433,6 @@ bool astra_input_read_event(AstraInputEvent *event_out) {
                     astra_uart_puts("\n");
                 }
                 return true;
-            }
-            if (status != ASTRA_INPUT_EFI_NOT_READY &&
-                status != ASTRA_INPUT_EFI_UNSUPPORTED) {
-                g_simple_pointer = NULL;
-                astra_uart_puts("desktop: Simple Pointer disabled after device error\n");
-            }
-        }
-
-        if (g_absolute_pointer != NULL) {
-            AstraFirmwareAbsolutePointerState absolute_state;
-            const AstraFirmwareAbsolutePointerMode *mode =
-                g_absolute_pointer->mode;
-            absolute_state.current_x = 0u;
-            absolute_state.current_y = 0u;
-            absolute_state.current_z = 0u;
-            absolute_state.active_buttons = 0u;
-            status = firmware_read_absolute_pointer(&absolute_state);
-            if (status == ASTRA_INPUT_EFI_SUCCESS && mode != NULL) {
-                event_out->kind = ASTRA_INPUT_EVENT_POINTER;
-                event_out->absolute = true;
-                event_out->absolute_x = absolute_state.current_x;
-                event_out->absolute_y = absolute_state.current_y;
-                event_out->min_x = mode->min_x;
-                event_out->max_x = mode->max_x;
-                event_out->min_y = mode->min_y;
-                event_out->max_y = mode->max_y;
-                event_out->left_button_down =
-                    (absolute_state.active_buttons & UINT32_C(1)) != 0u;
-                event_out->right_button_down =
-                    (absolute_state.active_buttons & UINT32_C(2)) != 0u;
-                if (!g_logged_pointer_state) {
-                    g_logged_pointer_state = true;
-                    astra_uart_puts("desktop: UEFI Absolute Pointer event received x=");
-                    astra_uart_put_u32((uint32_t)absolute_state.current_x);
-                    astra_uart_puts(" y=");
-                    astra_uart_put_u32((uint32_t)absolute_state.current_y);
-                    astra_uart_puts(" left=");
-                    astra_uart_put_u32(event_out->left_button_down ? 1u : 0u);
-                    astra_uart_puts("\n");
-                }
-                return true;
-            }
-            if (status != ASTRA_INPUT_EFI_NOT_READY &&
-                status != ASTRA_INPUT_EFI_UNSUPPORTED) {
-                g_absolute_pointer = NULL;
-                astra_uart_puts("desktop: Absolute Pointer disabled after device error\n");
             }
         }
 
