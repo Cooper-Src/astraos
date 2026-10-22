@@ -86,7 +86,7 @@ class QMPClient:
 class QMPPointer:
     """Inject pointer input through QMP instead of relying on VNC client semantics."""
 
-    ABS_MAX = 0x7FFFF
+    ABS_MAX = 0x7FFF
 
     def __init__(self, client: QMPClient, width: int, height: int) -> None:
         self._client = client
