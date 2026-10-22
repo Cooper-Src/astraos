@@ -370,7 +370,7 @@ def main(argv: list[str]) -> int:
         wait_for_log(log_path, "desktop: terminal window closed", EVENT_TIMEOUT)
 
         # Files sees the file Terminal just wrote; click the row twice to open it.
-        client.click(75, 20, width, height)
+        mouse.click(75, 20, width, height)
         wait_for_log(log_path, "desktop: applications menu opened", EVENT_TIMEOUT)
         client.click(65, 47 + 70, width, height)
         wait_for_log(log_path, "desktop: file browser opened", EVENT_TIMEOUT)
