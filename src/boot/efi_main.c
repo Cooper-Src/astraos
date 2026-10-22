@@ -1232,6 +1232,9 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *system_table) {
     g_boot_info.flags = 0u;
     g_boot_info.firmware_input_protocol = NULL;
     g_boot_info.firmware_wait_for_event = NULL;
+    g_boot_info.firmware_simple_pointer_protocol = NULL;
+    g_boot_info.firmware_absolute_pointer_protocol = NULL;
+    g_boot_info.firmware_pointer_poll_event = NULL;
     g_boot_info.firmware_exception_level = 0u;
     g_boot_info.firmware_exception_vector = 0u;
     g_boot_info.firmware_daif = 0u;
