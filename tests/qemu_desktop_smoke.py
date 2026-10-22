@@ -372,7 +372,7 @@ def main(argv: list[str]) -> int:
         # Files sees the file Terminal just wrote; click the row twice to open it.
         mouse.click(75, 20, width, height)
         wait_for_log(log_path, "desktop: applications menu opened", EVENT_TIMEOUT)
-        client.click(65, 47 + 70, width, height)
+        mouse.click(65, 47 + 70, width, height)
         wait_for_log(log_path, "desktop: file browser opened", EVENT_TIMEOUT)
 
         file_width = min(720, width - 40)
@@ -385,19 +385,19 @@ def main(argv: list[str]) -> int:
             file_y = height - 54 - file_height - 8
         first_row_y = file_y + 30 + 18 + 23
         mouse_file_row_y = first_row_y + 4 * 18 + 9
-        client.click(file_x + 100, mouse_file_row_y, width, height)
+        mouse.click(file_x + 100, mouse_file_row_y, width, height)
         wait_for_log(log_path, "desktop: file entry selected by pointer", EVENT_TIMEOUT)
-        client.click(file_x + 100, mouse_file_row_y, width, height)
+        mouse.click(file_x + 100, mouse_file_row_y, width, height)
         wait_for_log(log_path, "desktop: text viewer opened: mouse.txt", EVENT_TIMEOUT)
         client.send_key("b")
         wait_for_log(log_path, "desktop: text viewer closed", EVENT_TIMEOUT)
 
         # The taskbar can minimise, restore, and close the File Manager.
-        client.click(file_x + file_width - 63, file_y + 16, width, height)
+        mouse.click(file_x + file_width - 63, file_y + 16, width, height)
         wait_for_log(log_path, "desktop: window minimized", EVENT_TIMEOUT)
-        client.click(280, 20, width, height)
+        mouse.click(280, 20, width, height)
         wait_for_log(log_path, "desktop: taskbar window focused", EVENT_TIMEOUT)
-        client.click(file_x + file_width - 15, file_y + 16, width, height)
+        mouse.click(file_x + file_width - 15, file_y + 16, width, height)
         wait_for_log(log_path, "desktop: window closed", EVENT_TIMEOUT)
         client.send_key("q")
         wait_for_log(log_path, "desktop: returned to shell", EVENT_TIMEOUT)
