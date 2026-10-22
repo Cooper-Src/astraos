@@ -31,6 +31,13 @@ static void *g_firmware_poll_event = NULL;
 static uint64_t g_firmware_exception_level = 0u;
 static uint64_t g_firmware_exception_vector = 0u;
 static uint64_t g_firmware_daif = 0u;
+#if defined(__aarch64__)
+static bool g_logged_wait_event = false;
+static bool g_logged_absolute_not_ready = false;
+static bool g_logged_absolute_ready = false;
+static bool g_logged_relative_not_ready = false;
+static bool g_logged_relative_ready = false;
+#endif
 
 #if defined(__aarch64__)
 /*
@@ -259,6 +266,14 @@ static uint64_t firmware_wait_for_input(void) {
     }
     status = g_wait_for_event(event_count, events, &event_index);
     firmware_context_leave(&state);
+#if defined(__aarch64__)
+    if (status == ASTRA_INPUT_EFI_SUCCESS && !g_logged_wait_event) {
+        g_logged_wait_event = true;
+        astra_uart_puts("desktop: UEFI WaitForEvent resumed at index ");
+        astra_uart_put_u32((uint32_t)event_index);
+        astra_uart_puts("\\n");
+    }
+#endif
 #else
     (void)state;
     (void)events;
@@ -306,6 +321,13 @@ bool astra_input_initialize(const AstraBootInfo *boot_info, bool serial_ready) {
     g_wait_for_event = NULL;
     g_firmware_stall = NULL;
     g_firmware_poll_event = NULL;
+#if defined(__aarch64__)
+    g_logged_wait_event = false;
+    g_logged_absolute_not_ready = false;
+    g_logged_absolute_ready = false;
+    g_logged_relative_not_ready = false;
+    g_logged_relative_ready = false;
+#endif
     g_firmware_exception_level = 0u;
     g_firmware_exception_vector = 0u;
     g_firmware_daif = 0u;
@@ -416,6 +438,22 @@ bool astra_input_read_event(AstraInputEvent *event_out) {
             AstraFirmwareAbsolutePointerMode *mode =
                 g_firmware_absolute_pointer->mode;
             status = firmware_read_absolute_pointer(&pointer);
+#if defined(__aarch64__)
+            if (status == ASTRA_INPUT_EFI_NOT_READY && !g_logged_absolute_not_ready) {
+                g_logged_absolute_not_ready = true;
+                astra_uart_puts("desktop: Absolute Pointer GetState returned EFI_NOT_READY.\\n");
+            }
+            if (status == ASTRA_INPUT_EFI_SUCCESS && !g_logged_absolute_ready) {
+                g_logged_absolute_ready = true;
+                astra_uart_puts("desktop: Absolute Pointer state received x=");
+                astra_uart_put_u32((uint32_t)pointer.current_x);
+                astra_uart_puts(" y=");
+                astra_uart_put_u32((uint32_t)pointer.current_y);
+                astra_uart_puts(" buttons=");
+                astra_uart_put_u32(pointer.active_buttons);
+                astra_uart_puts("\\n");
+            }
+#endif
             if (status == ASTRA_INPUT_EFI_SUCCESS && mode != NULL) {
                 event_out->type = ASTRA_INPUT_EVENT_POINTER;
                 event_out->absolute = true;
@@ -442,6 +480,22 @@ bool astra_input_read_event(AstraInputEvent *event_out) {
         if (g_firmware_pointer != NULL) {
             AstraFirmwarePointerState pointer = {0};
             status = firmware_read_pointer(&pointer);
+#if defined(__aarch64__)
+            if (status == ASTRA_INPUT_EFI_NOT_READY && !g_logged_relative_not_ready) {
+                g_logged_relative_not_ready = true;
+                astra_uart_puts("desktop: Simple Pointer GetState returned EFI_NOT_READY.\\n");
+            }
+            if (status == ASTRA_INPUT_EFI_SUCCESS && !g_logged_relative_ready) {
+                g_logged_relative_ready = true;
+                astra_uart_puts("desktop: Simple Pointer state received dx=");
+                astra_uart_put_u32((uint32_t)pointer.relative_movement_x);
+                astra_uart_puts(" dy=");
+                astra_uart_put_u32((uint32_t)pointer.relative_movement_y);
+                astra_uart_puts(" buttons=");
+                astra_uart_put_u32(pointer.left_button != 0u ? 1u : 0u);
+                astra_uart_puts("\\n");
+            }
+#endif
             if (status == ASTRA_INPUT_EFI_SUCCESS) {
                 event_out->type = ASTRA_INPUT_EVENT_POINTER;
                 event_out->pointer_dx = pointer.relative_movement_x;
