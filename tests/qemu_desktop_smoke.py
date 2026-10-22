@@ -117,7 +117,7 @@ def verify_screen_capture(client: QMPClient, path: Path) -> None:
     except OSError as error:
         raise RuntimeError(f"QEMU did not produce a desktop screenshot: {error}") from error
 
-    header_end = payload.find(b"\\n255\\n")
+    header_end = payload.find(b"\n255\n")
     if not payload.startswith(b"P6") or header_end < 0:
         raise RuntimeError("QEMU screenshot is not a valid binary PPM image")
     header_tokens = payload[:header_end].split()
