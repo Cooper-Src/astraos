@@ -156,11 +156,15 @@ jobs:
             wait "$QEMU_PID" 2>/dev/null || true
           }
           trap cleanup EXIT
+          set +e
           python3 tests/qemu_desktop_smoke.py build/qmp-desktop.sock build/qemu-desktop-serial.log
+          TEST_STATUS=$?
+          set -e
           cleanup
           trap - EXIT
           cat build/qemu-desktop-launch.log
           cat build/qemu-desktop-serial.log
+          exit "$TEST_STATUS"
 
       - name: Upload live images and diagnostics
         uses: actions/upload-artifact@v4

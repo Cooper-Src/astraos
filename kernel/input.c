@@ -33,6 +33,7 @@ static uint64_t g_firmware_exception_vector = 0u;
 static uint64_t g_firmware_daif = 0u;
 static bool g_last_pointer_left = false;
 static bool g_last_pointer_right = false;
+static uint64_t g_pointer_poll_count = 0u;
 
 #if defined(__aarch64__)
 /*
@@ -169,6 +170,15 @@ static bool firmware_poll_pointer(AstraInputEvent *event_out, bool *ready_out) {
     }
     status = pointer->get_state(pointer, &pointer_state);
     firmware_context_leave(&state);
+
+    g_pointer_poll_count++;
+    if (status == ASTRA_INPUT_EFI_NOT_READY &&
+        (g_pointer_poll_count <= UINT64_C(3) ||
+            (g_pointer_poll_count % UINT64_C(100)) == 0u)) {
+        astra_uart_puts("input: UEFI mouse GetState not ready; poll=");
+        astra_uart_put_hex(g_pointer_poll_count);
+        astra_uart_puts("\\n");
+    }
 #else
     (void)state;
     (void)pointer_state;
@@ -269,6 +279,7 @@ bool astra_input_initialize(const AstraBootInfo *boot_info, bool serial_ready) {
     g_firmware_daif = 0u;
     g_last_pointer_left = false;
     g_last_pointer_right = false;
+    g_pointer_poll_count = 0u;
 
     if (boot_info != NULL &&
         boot_info->magic == ASTRA_BOOT_INFO_MAGIC &&

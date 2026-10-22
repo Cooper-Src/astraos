@@ -82,26 +82,17 @@ class QMPClient:
         self.execute("human-monitor-command", {"command-line": f"sendkey {key}"})
 
     def send_pointer_motion(self, dx: int, dy: int) -> None:
+        # Exercise QEMU's active virtual mouse rather than only its display seat.
         self.execute(
-            "input-send-event",
-            {
-                "device": "video0",
-                "events": [
-                    {"type": "rel", "data": {"axis": "x", "value": dx}},
-                    {"type": "rel", "data": {"axis": "y", "value": dy}},
-                ],
-            },
+            "human-monitor-command",
+            {"command-line": f"mouse_move {dx} {dy}"},
         )
 
     def send_mouse_button(self, down: bool) -> None:
+        # HMP represents held buttons as a bitmask: 1 = left, 0 = released.
         self.execute(
-            "input-send-event",
-            {
-                "device": "video0",
-                "events": [
-                    {"type": "btn", "data": {"button": "left", "down": down}}
-                ],
-            },
+            "human-monitor-command",
+            {"command-line": f"mouse_button {1 if down else 0}"},
         )
 
     def click(self) -> None:
@@ -226,6 +217,11 @@ def main(argv: list[str]) -> int:
         print(f"QEMU mouse devices: {mice!r}")
         if not mice:
             raise RuntimeError("QEMU registered no input mouse device")
+        current_mouse = next((mouse for mouse in mice if mouse.get("current")), mice[0])
+        client.execute(
+            "human-monitor-command",
+            {"command-line": f"mouse_set {current_mouse['index']}"},
+        )
         verify_screen_capture(client, log_path.with_name("desktop-screen.ppm"))
 
         # QEMU starts the pointer at the centre. Move to the top-left corner,
