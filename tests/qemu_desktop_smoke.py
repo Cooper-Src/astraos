@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import re
 import socket
 import struct
 import sys
@@ -29,6 +30,7 @@ class QMPClient:
         self._pointer_y: int | None = None
         self._hmp_pointer_x: int | None = None
         self._hmp_pointer_y: int | None = None
+        self.active_mouse_index: int | None = None
         try:
             self._socket.settimeout(CONNECT_TIMEOUT)
             self._socket.connect(socket_path)
@@ -137,7 +139,7 @@ class QMPClient:
         delta_y = y - self._hmp_pointer_y
         self.execute(
             "human-monitor-command",
-            {"command-line": "mouse_set 0"},
+            {"command-line": f"mouse_set {self.active_mouse_index if self.active_mouse_index is not None else 0}"},
         )
         steps = max(1, (max(abs(delta_x), abs(delta_y)) + 39) // 40)
         for step in range(steps):
@@ -453,6 +455,11 @@ def main(argv: list[str]) -> int:
             {"command-line": "info mice"},
         )
         print(f"QEMU input devices: {mice}")
+        active_mouse = re.search(r"\\*\\s*Mouse #(\\d+)", str(mice))
+        if active_mouse is None:
+            active_mouse = re.search(r"Mouse #(\\d+)", str(mice))
+        if active_mouse is not None:
+            client.active_mouse_index = int(active_mouse.group(1))
         # First try QMP's documented guest-input event path, using the absolute
         # coordinate range expected by QEMU. If this display backend does not route
         # input to the USB tablet, fall back to the real VNC/RFB host-pointer path.
