@@ -81,6 +81,25 @@ class QMPClient:
     def send_key(self, key: str) -> None:
         self.execute("human-monitor-command", {"command-line": f"sendkey {key}"})
 
+    def send_pointer_motion(self, dx: int, dy: int) -> None:
+        events = [
+            {"type": "rel", "data": {"axis": "x", "value": dx}},
+            {"type": "rel", "data": {"axis": "y", "value": dy}},
+        ]
+        self.execute("input-send-event", {"events": events})
+
+    def send_mouse_button(self, down: bool) -> None:
+        self.execute(
+            "input-send-event",
+            {"events": [{"type": "btn", "data": {"button": "left", "down": down}}],
+        )
+
+    def click(self) -> None:
+        self.send_mouse_button(True)
+        time.sleep(0.12)
+        self.send_mouse_button(False)
+        time.sleep(0.12)
+
 
 def read_log(path: Path) -> str:
     try:
@@ -140,8 +159,30 @@ def main(argv: list[str]) -> int:
             raise RuntimeError(f"could not connect to QMP socket: {last_error}")
 
         wait_for_log(log_path, "ASTRAOS_DISPLAY_SERVER_READY", BOOT_TIMEOUT)
-        client.send_key("t")
-        wait_for_log(log_path, "desktop: terminal window opened", EVENT_TIMEOUT)
+        wait_for_log(log_path, "ASTRAOS_POINTER_AVAILABLE", EVENT_TIMEOUT)
+
+        # QEMU starts the pointer at the centre. Move to the top-left corner,
+        # then to the Applications launcher and click it using guest mouse events.
+        for _ in range(8):
+            client.send_pointer_motion(-100, -100)
+            time.sleep(0.08)
+        client.send_pointer_motion(35, 10)  # pointer accelerates by 2x in the compositor
+        time.sleep(0.15)
+        client.click()
+        wait_for_log(log_path, "desktop: applications menu opened by pointer", EVENT_TIMEOUT)
+        client.send_pointer_motion(-5, 35)
+        time.sleep(0.15)
+        client.click()
+        wait_for_log(log_path, "desktop: terminal window opened by pointer", EVENT_TIMEOUT)
+
+        # Verify a real taskbar click can minimise and restore the application.
+        client.send_pointer_motion(70, -35)
+        time.sleep(0.15)
+        client.click()
+        wait_for_log(log_path, "desktop: window minimized", EVENT_TIMEOUT)
+        client.click()
+        wait_for_log(log_path, "desktop: taskbar item activated by pointer", EVENT_TIMEOUT)
+
         type_command(client, "help")
         wait_for_log(log_path, "desktop: terminal command help", EVENT_TIMEOUT)
         type_command(client, "pwd")
@@ -164,7 +205,7 @@ def main(argv: list[str]) -> int:
         wait_for_log(log_path, "desktop: window minimized", EVENT_TIMEOUT)
         client.send_key("q")
         wait_for_log(log_path, "desktop: returned to shell", EVENT_TIMEOUT)
-        print("AstraOS desktop smoke test passed: compositor, shared-filesystem terminal, launcher, file manager and window controls worked.")
+        print("AstraOS desktop smoke test passed: UEFI pointer, Applications menu, mouse-launched terminal, taskbar minimise/restore, shared-VFS terminal, file manager and window controls worked.")
         return 0
     except (OSError, RuntimeError, TimeoutError, ValueError, json.JSONDecodeError) as error:
         print(f"desktop smoke test failed: {error}", file=sys.stderr)
