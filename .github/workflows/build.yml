@@ -142,7 +142,7 @@ jobs:
           rm -f build/qmp-desktop.sock build/qemu-desktop-serial.log build/qemu-desktop-launch.log build/desktop-screen.ppm
           qemu-system-aarch64 \
             -machine virt -cpu cortex-a72 -m 1024 \
-            -device ramfb,id=desktop-display -device qemu-xhci -device usb-kbd -device usb-tablet,display=desktop-display \
+            -device ramfb -device qemu-xhci -device usb-kbd -device usb-tablet \
             -drive if=pflash,unit=0,format=raw,readonly=on,file="$CODE" \
             -drive if=pflash,unit=1,format=raw,file=build/uefi-desktop-vars.fd \
             -cdrom build/astraos-aarch64-desktop.iso -boot order=d \
