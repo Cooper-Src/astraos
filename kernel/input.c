@@ -1,8 +1,6 @@
 #include "input.h"
 
-#if defined(ASTRAOS_KERNEL_BUILD)
 #include "uart.h"
-#endif
 
 #include <stddef.h>
 #include <stdint.h>
