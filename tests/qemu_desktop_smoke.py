@@ -81,6 +81,78 @@ class QMPClient:
     def send_key(self, key: str) -> None:
         self.execute("human-monitor-command", {"command-line": f"sendkey {key}"})
 
+    def send_pointer_motion(self, dx: int, dy: int) -> None:
+        # Exercise QEMU's active virtual mouse rather than only its display seat.
+        self.execute(
+            "human-monitor-command",
+            {"command-line": f"mouse_move {dx} {dy}"},
+        )
+
+    def send_mouse_button(self, down: bool) -> None:
+        # HMP represents held buttons as a bitmask: 1 = left, 0 = released.
+        self.execute(
+            "human-monitor-command",
+            {"command-line": f"mouse_button {1 if down else 0}"},
+        )
+
+    def click(self) -> None:
+        self.send_mouse_button(True)
+        time.sleep(0.12)
+        self.send_mouse_button(False)
+        time.sleep(0.12)
+
+
+
+def verify_screen_capture(client: QMPClient, path: Path) -> None:
+    """Reject an unpainted framebuffer, even if serial-side tests pass."""
+    path.unlink(missing_ok=True)
+    client.execute(
+        "human-monitor-command",
+        {"command-line": f"screendump {path}"},
+    )
+    deadline = time.monotonic() + 3.0
+    while time.monotonic() < deadline and not path.exists():
+        time.sleep(0.05)
+    try:
+        payload = path.read_bytes()
+    except OSError as error:
+        raise RuntimeError(f"QEMU did not produce a desktop screenshot: {error}") from error
+
+    header_end = payload.find(b"\n255\n")
+    if not payload.startswith(b"P6") or header_end < 0:
+        raise RuntimeError("QEMU screenshot is not a valid binary PPM image")
+    header_tokens = payload[:header_end].split()
+    if len(header_tokens) != 3:
+        raise RuntimeError("QEMU screenshot has a malformed PPM header")
+    width, height = int(header_tokens[1]), int(header_tokens[2])
+    if width < 480 or height < 360:
+        raise RuntimeError(f"unexpected desktop geometry: {width}x{height}")
+
+    pixels = payload[header_end + 5:]
+    expected_bytes = width * height * 3
+    if len(pixels) != expected_bytes:
+        raise RuntimeError(
+            f"truncated screenshot: expected {expected_bytes} pixels bytes, "
+            f"found {len(pixels)}"
+        )
+
+    sampled_colors: set[bytes] = set()
+    step_x = max(width // 32, 1)
+    step_y = max(height // 24, 1)
+    for y in range(0, height, step_y):
+        for x in range(0, width, step_x):
+            offset = (y * width + x) * 3
+            sampled_colors.add(pixels[offset:offset + 3])
+    if len(sampled_colors) < 8:
+        raise RuntimeError(
+            f"desktop framebuffer appears blank: only {len(sampled_colors)} "
+            "sampled colours"
+        )
+    print(
+        f"Framebuffer screenshot validated: {width}x{height}, "
+        f"{len(sampled_colors)} sampled colours."
+    )
+
 
 def read_log(path: Path) -> str:
     try:
@@ -140,8 +212,43 @@ def main(argv: list[str]) -> int:
             raise RuntimeError(f"could not connect to QMP socket: {last_error}")
 
         wait_for_log(log_path, "ASTRAOS_DISPLAY_SERVER_READY", BOOT_TIMEOUT)
-        client.send_key("t")
-        wait_for_log(log_path, "desktop: terminal window opened", EVENT_TIMEOUT)
+        wait_for_log(log_path, "ASTRAOS_POINTER_AVAILABLE", EVENT_TIMEOUT)
+        mice = client.execute("query-mice")
+        print(f"QEMU mouse devices: {mice!r}")
+        if not mice:
+            raise RuntimeError("QEMU registered no input mouse device")
+        current_mouse = next((mouse for mouse in mice if mouse.get("current")), mice[0])
+        client.execute(
+            "human-monitor-command",
+            {"command-line": f"mouse_set {current_mouse['index']}"},
+        )
+        verify_screen_capture(client, log_path.with_name("desktop-screen.ppm"))
+
+        # QEMU starts the pointer at the centre. Move to the top-left corner,
+        # then to the Applications launcher and click it using guest mouse events.
+        for _ in range(48):
+            client.send_pointer_motion(-100, -100)
+            time.sleep(0.04)
+        wait_for_log(log_path, "ASTRAOS_POINTER_EVENT_RECEIVED", EVENT_TIMEOUT)
+        # From the corner, this movement stays within the Applications hitbox
+        # across common firmware pointer sensitivities.
+        client.send_pointer_motion(20, 5)
+        time.sleep(0.15)
+        client.click()
+        wait_for_log(log_path, "desktop: applications menu opened by pointer", EVENT_TIMEOUT)
+        client.send_pointer_motion(-5, 40)
+        time.sleep(0.15)
+        client.click()
+        wait_for_log(log_path, "desktop: terminal window opened by pointer", EVENT_TIMEOUT)
+
+        # Verify a real taskbar click can minimise and restore the application.
+        client.send_pointer_motion(115, -35)
+        time.sleep(0.15)
+        client.click()
+        wait_for_log(log_path, "desktop: window minimized", EVENT_TIMEOUT)
+        client.click()
+        wait_for_log(log_path, "desktop: taskbar item activated by pointer", EVENT_TIMEOUT)
+
         type_command(client, "help")
         wait_for_log(log_path, "desktop: terminal command help", EVENT_TIMEOUT)
         type_command(client, "pwd")
@@ -164,7 +271,7 @@ def main(argv: list[str]) -> int:
         wait_for_log(log_path, "desktop: window minimized", EVENT_TIMEOUT)
         client.send_key("q")
         wait_for_log(log_path, "desktop: returned to shell", EVENT_TIMEOUT)
-        print("AstraOS desktop smoke test passed: compositor, shared-filesystem terminal, launcher, file manager and window controls worked.")
+        print("AstraOS desktop smoke test passed: UEFI pointer, Applications menu, mouse-launched terminal, taskbar minimise/restore, shared-VFS terminal, file manager and window controls worked.")
         return 0
     except (OSError, RuntimeError, TimeoutError, ValueError, json.JSONDecodeError) as error:
         print(f"desktop smoke test failed: {error}", file=sys.stderr)

@@ -11,6 +11,10 @@ uint8_t astra_uart_get_byte(void) {
     return g_serial_byte;
 }
 
+void astra_uart_puts(const char *text) {
+    (void)text;
+}
+
 #define CHECK(condition) \
     do { \
         if (!(condition)) { \
@@ -45,8 +49,13 @@ static void test_ascii_key_translation(void) {
 
 static void test_serial_input_fallback(void) {
     uint8_t byte = 0u;
+    AstraInputEvent event = {0};
 
     CHECK(astra_input_initialize(NULL, true));
+    CHECK(astra_input_read_event(&event));
+    CHECK(event.type == ASTRA_INPUT_EVENT_KEY);
+    CHECK(event.key == g_serial_byte);
+    CHECK(!event.left_button_down);
     CHECK(astra_input_read_byte(&byte));
     CHECK(byte == g_serial_byte);
 
