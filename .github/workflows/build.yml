@@ -143,7 +143,7 @@ jobs:
           qemu-system-aarch64 \
             -machine virt -cpu cortex-a72 -m 1024 \
             -device ramfb,id=video0 -device qemu-xhci,id=xhci \
-            -device usb-kbd,bus=xhci.0 -device usb-mouse,bus=xhci.0,display=video0 \
+            -device usb-kbd,bus=xhci.0 -device usb-mouse,bus=xhci.0 \
             -drive if=pflash,unit=0,format=raw,readonly=on,file="$CODE" \
             -drive if=pflash,unit=1,format=raw,file=build/uefi-desktop-vars.fd \
             -cdrom build/astraos-aarch64-desktop.iso -boot order=d \
