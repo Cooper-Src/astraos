@@ -81,14 +81,21 @@ class QMPClient:
     def send_key(self, key: str) -> None:
         self.execute("human-monitor-command", {"command-line": f"sendkey {key}"})
 
-    def move_mouse(self, dx: int, dy: int) -> None:
-        events: list[dict[str, Any]] = []
-        if dx != 0:
-            events.append({"type": "rel", "data": {"axis": "x", "value": dx}})
-        if dy != 0:
-            events.append({"type": "rel", "data": {"axis": "y", "value": dy}})
-        if events:
-            self.execute("input-send-event", {"events": events})
+    def move_mouse_to(
+        self, x: int, y: int, screen_width: int, screen_height: int
+    ) -> None:
+        if (x < 0 or x >= screen_width or y < 0 or y >= screen_height or
+                screen_width <= 1 or screen_height <= 1):
+            raise ValueError("mouse target falls outside the framebuffer")
+        absolute_x = (x * 32767) // (screen_width - 1)
+        absolute_y = (y * 32767) // (screen_height - 1)
+        self.execute("input-send-event", {
+            "events": [
+                {"type": "abs", "data": {"axis": "x", "value": absolute_x}},
+                {"type": "abs", "data": {"axis": "y", "value": absolute_y}},
+            ]
+        })
+        time.sleep(0.15)
 
     def click_mouse(self, button: str = "left") -> None:
         self.execute("input-send-event", {
@@ -235,35 +242,44 @@ def main(argv: list[str]) -> int:
             f"with {sampled_colors} sampled colours."
         )
 
-        # The pointer starts on the AstraOS logo. Exercise Start -> Terminal,
-        # then use the taskbar and menu to open Files with mouse clicks.
-        client.move_mouse(26, 0)
+        wait_for_log(log_path, "desktop: pointer event received", EVENT_TIMEOUT)
+
+        # QMP absolute input is delivered to the emulated USB tablet and translated
+        # by UEFI into absolute coordinates; this is different from host-window motion.
+        client.move_mouse_to(80, 20, screenshot_width, screenshot_height)
         client.click_mouse()
         wait_for_log(log_path, "desktop: applications menu opened by pointer", EVENT_TIMEOUT)
-        client.move_mouse(-10, 38)
+        client.move_mouse_to(32, 95, screenshot_width, screenshot_height)
         client.click_mouse()
         wait_for_log(log_path, "desktop: terminal window opened by pointer", EVENT_TIMEOUT)
+
         type_command(client, "pwd")
         wait_for_log(log_path, "desktop: terminal command pwd", EVENT_TIMEOUT)
+        type_command(client, "touch /tmp/mouse-test.txt")
+        wait_for_log(log_path, "desktop: terminal filesystem create", EVENT_TIMEOUT)
+        type_command(client, "write /tmp/mouse-test.txt pointer-ok")
+        wait_for_log(log_path, "desktop: terminal command write", EVENT_TIMEOUT)
 
-        # Reopen the menu using the mouse and start the real file manager.
-        client.move_mouse(10, -38)
+        # Open Files from the same menu, navigate to /tmp, and open the new file.
+        client.move_mouse_to(80, 20, screenshot_width, screenshot_height)
         client.click_mouse()
         wait_for_log(log_path, "desktop: applications menu opened by pointer", EVENT_TIMEOUT)
-        client.move_mouse(-10, 50)
+        client.move_mouse_to(32, 119, screenshot_width, screenshot_height)
         client.click_mouse()
         wait_for_log(log_path, "desktop: file browser opened by pointer", EVENT_TIMEOUT)
-
-        # Select and double-click the first directory in the shared RAM VFS.
-        client.move_mouse(30, 15)
+        client.move_mouse_to(92, 181, screenshot_width, screenshot_height)
         client.click_mouse()
         wait_for_log(log_path, "desktop: file entry selected by pointer", EVENT_TIMEOUT)
         client.click_mouse()
         wait_for_log(log_path, "desktop: files directory opened", EVENT_TIMEOUT)
+        client.move_mouse_to(112, 149, screenshot_width, screenshot_height)
+        client.click_mouse()
+        wait_for_log(log_path, "desktop: file entry selected by pointer", EVENT_TIMEOUT)
+        client.click_mouse()
+        wait_for_log(log_path, "desktop: text viewer opened", EVENT_TIMEOUT)
 
-        # Focus Terminal from the taskbar, prove it still accepts keystrokes,
-        # then keep the existing keyboard-window management coverage.
-        client.move_mouse(87, -65)
+        # The task button for Terminal is the second entry on the panel.
+        client.move_mouse_to(280, 20, screenshot_width, screenshot_height)
         client.click_mouse()
         wait_for_log(log_path, "desktop: taskbar window focused by pointer", EVENT_TIMEOUT)
         type_command(client, "help")
