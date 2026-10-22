@@ -29,6 +29,8 @@ static AstraFirmwareAbsolutePointerProtocol *g_firmware_absolute_pointer = NULL;
 static AstraFirmwareWaitForEvent g_wait_for_event = NULL;
 static void *g_firmware_poll_timer_event = NULL;
 static bool g_pointer_polling_active = false;
+static bool g_pointer_probe_reported = false;
+static bool g_relative_pointer_probe_reported = false;
 static uint32_t g_pointer_screen_width = 1u;
 static uint32_t g_pointer_screen_height = 1u;
 static uint64_t g_firmware_exception_level = 0u;
@@ -178,6 +180,21 @@ static uint64_t firmware_read_pointer(AstraFirmwarePointerState *state_out) {
     (void)state_out;
 #endif
 
+    if (!g_relative_pointer_probe_reported) {
+        g_relative_pointer_probe_reported = true;
+        astra_uart_puts("desktop: relative pointer first poll status=");
+        astra_uart_put_hex((uint32_t)status);
+        if (status == ASTRA_INPUT_EFI_SUCCESS) {
+            astra_uart_puts(" dx=");
+            astra_uart_put_hex((uint32_t)state_out->relative_movement_x);
+            astra_uart_puts(" dy=");
+            astra_uart_put_hex((uint32_t)state_out->relative_movement_y);
+            astra_uart_puts(" left=");
+            astra_uart_put_hex(state_out->left_button);
+        }
+        astra_uart_puts("\n");
+    }
+
     return status;
 }
 
@@ -230,6 +247,21 @@ static uint64_t firmware_read_absolute_pointer(
     (void)state;
     (void)state_out;
 #endif
+
+    if (!g_pointer_probe_reported) {
+        g_pointer_probe_reported = true;
+        astra_uart_puts("desktop: absolute pointer first poll status=");
+        astra_uart_put_hex((uint32_t)status);
+        if (status == ASTRA_INPUT_EFI_SUCCESS) {
+            astra_uart_puts(" x=");
+            astra_uart_put_hex((uint32_t)state_out->current_x);
+            astra_uart_puts(" y=");
+            astra_uart_put_hex((uint32_t)state_out->current_y);
+            astra_uart_puts(" buttons=");
+            astra_uart_put_hex(state_out->active_buttons);
+        }
+        astra_uart_puts("\n");
+    }
 
     return status;
 }
@@ -332,6 +364,8 @@ bool astra_input_initialize(const AstraBootInfo *boot_info, bool serial_ready) {
     g_wait_for_event = NULL;
     g_firmware_poll_timer_event = NULL;
     g_pointer_polling_active = false;
+    g_pointer_probe_reported = false;
+    g_relative_pointer_probe_reported = false;
     g_firmware_exception_level = 0u;
     g_firmware_exception_vector = 0u;
     g_firmware_daif = 0u;
