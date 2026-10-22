@@ -15,7 +15,7 @@ enum {
     ASTRA_INPUT_ASCII_MAX = 0x7f,
     ASTRA_INPUT_DAIF_IRQ_MASK_BIT = 7u,
     ASTRA_INPUT_VBAR_ALIGNMENT_MASK = 0x7ffu,
-    ASTRA_INPUT_EVENT_CAP = 2u
+    ASTRA_INPUT_EVENT_CAP = 3u
 };
 
 typedef struct AstraFirmwareCallState {
@@ -26,6 +26,7 @@ typedef struct AstraFirmwareCallState {
 static bool g_use_serial_input = false;
 static AstraFirmwareTextInputProtocol *g_firmware_input = NULL;
 static AstraFirmwareSimplePointerProtocol *g_firmware_pointer = NULL;
+static void *g_firmware_pointer_poll_event = NULL;
 static AstraFirmwareWaitForEvent g_wait_for_event = NULL;
 static uint64_t g_firmware_exception_level = 0u;
 static uint64_t g_firmware_exception_vector = 0u;
@@ -221,6 +222,11 @@ static uint64_t firmware_wait_for_input(uint64_t *event_index_out) {
         events[event_count] = g_firmware_pointer->wait_for_input;
         event_count++;
     }
+    if (g_firmware_pointer_poll_event != NULL &&
+        event_count < (uint64_t)ASTRA_INPUT_EVENT_CAP) {
+        events[event_count] = g_firmware_pointer_poll_event;
+        event_count++;
+    }
 
 #if defined(__aarch64__)
     if (!firmware_context_enter(&state)) {
@@ -256,6 +262,7 @@ bool astra_input_initialize(const AstraBootInfo *boot_info, bool serial_ready) {
     g_use_serial_input = false;
     g_firmware_input = NULL;
     g_firmware_pointer = NULL;
+    g_firmware_pointer_poll_event = NULL;
     g_wait_for_event = NULL;
     g_firmware_exception_level = 0u;
     g_firmware_exception_vector = 0u;
@@ -279,6 +286,7 @@ bool astra_input_initialize(const AstraBootInfo *boot_info, bool serial_ready) {
             (uint64_t)ASTRA_INPUT_VBAR_ALIGNMENT_MASK) == 0u) {
         g_firmware_input = boot_info->firmware_input_protocol;
         g_firmware_pointer = boot_info->firmware_pointer_protocol;
+        g_firmware_pointer_poll_event = boot_info->firmware_pointer_poll_event;
         if (g_firmware_pointer != NULL &&
             (g_firmware_pointer->get_state == NULL ||
                 g_firmware_pointer->wait_for_input == NULL)) {
