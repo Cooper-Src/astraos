@@ -345,9 +345,8 @@ def main(argv: list[str]) -> int:
                 f"QMP={width}x{height}"
             )
         # Exercise the same RFB pointer path a person uses with QEMU's VNC display.
-        mouse.move(75, 20)
-        wait_for_log(log_path, "desktop: pointer report", EVENT_TIMEOUT)
         mouse.click(75, 20, width, height)
+        wait_for_log(log_path, "desktop: pointer report", EVENT_TIMEOUT)
         wait_for_log(log_path, "desktop: applications menu opened", EVENT_TIMEOUT)
         menu_screenshot = client.screenshot(screenshot_path)
         if menu_screenshot[2] == initial_screenshot[2]:
