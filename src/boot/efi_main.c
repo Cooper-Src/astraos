@@ -1061,7 +1061,7 @@ static void capture_firmware_pointer(
                 absolute_pointer->mode->absolute_min_x <= UINT32_MAX &&
             absolute_pointer->mode->absolute_max_y -
                 absolute_pointer->mode->absolute_min_y <= UINT32_MAX) {
-            status = absolute_pointer->reset(absolute_pointer, 0u);
+            status = absolute_pointer->reset(absolute_pointer, 1u);
             if (status != EFI_SUCCESS) {
                 loader_out(L"Warning: UEFI absolute pointer reset failed; trying polling anyway.\r\n");
             }
@@ -1078,7 +1078,7 @@ static void capture_firmware_pointer(
         relative_pointer = (AstraFirmwareSimplePointerProtocol *)interface;
         if (relative_pointer->reset != NULL &&
             relative_pointer->get_state != NULL) {
-            status = relative_pointer->reset(relative_pointer, 0u);
+            status = relative_pointer->reset(relative_pointer, 1u);
             if (status != EFI_SUCCESS) {
                 loader_out(L"Warning: UEFI simple pointer reset failed; trying polling anyway.\r\n");
             }
