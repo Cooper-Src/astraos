@@ -394,11 +394,11 @@ bool astra_input_read_event(AstraInputEvent *event_out) {
                 event_out->max_x = mode->max_x;
                 event_out->min_y = mode->min_y;
                 event_out->max_y = mode->max_y;
-                event_out->left_button_down = simple_ready ?
-                    simple_state.left_button != 0u :
+                /* Absolute Pointer coordinates and button flags belong together.
+                 * Do not let an unrelated/idle Simple Pointer mask tablet clicks. */
+                event_out->left_button_down =
                     (absolute_state.active_buttons & UINT32_C(1)) != 0u;
-                event_out->right_button_down = simple_ready ?
-                    simple_state.right_button != 0u :
+                event_out->right_button_down =
                     (absolute_state.active_buttons & UINT32_C(2)) != 0u;
             return true;
             }
