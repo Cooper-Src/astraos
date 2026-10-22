@@ -96,6 +96,7 @@ static uint32_t g_mouse_x;
 static uint32_t g_mouse_y;
 static bool g_mouse_left_down;
 static int g_drag_surface_index = -1;
+static uint32_t g_pointer_debug_reports;
 static uint32_t g_input_event_counter;
 static uint32_t g_files_last_click_event;
 static size_t g_files_last_click_index = SIZE_MAX;
@@ -1676,6 +1677,34 @@ static bool handle_pointer_event(const AstraInputEvent *event) {
         g_mouse_y = (uint32_t)new_y;
     }
 
+    if (g_pointer_debug_reports < 8u) {
+        g_pointer_debug_reports++;
+        astra_uart_puts("desktop: pointer report screen=");
+        astra_uart_put_u32(g_mouse_x);
+        astra_uart_puts(",");
+        astra_uart_put_u32(g_mouse_y);
+        astra_uart_puts(" left=");
+        astra_uart_put_u32(event->left_button_down ? 1u : 0u);
+        astra_uart_puts(" abs=");
+        astra_uart_put_u32(event->absolute ? 1u : 0u);
+        if (event->absolute) {
+            astra_uart_puts(" raw=");
+            astra_uart_put_u32((uint32_t)event->absolute_x);
+            astra_uart_puts(",");
+            astra_uart_put_u32((uint32_t)event->absolute_y);
+            astra_uart_puts(" range=");
+            astra_uart_put_u32((uint32_t)event->max_x);
+            astra_uart_puts(",");
+            astra_uart_put_u32((uint32_t)event->max_y);
+        } else {
+            astra_uart_puts(" delta=");
+            astra_uart_put_u32((uint32_t)event->delta_x);
+            astra_uart_puts(",");
+            astra_uart_put_u32((uint32_t)event->delta_y);
+        }
+        astra_uart_puts("\\n");
+    }
+
     if (event->left_button_down && !was_left_down) {
         if (handle_mouse_press(g_mouse_x, g_mouse_y)) {
             g_mouse_left_down = false;
@@ -1773,6 +1802,7 @@ bool astra_display_server_run(void) {
     g_mouse_y = g_screen_height / 2u;
     g_mouse_left_down = false;
     g_drag_surface_index = -1;
+    g_pointer_debug_reports = 0u;
     g_input_event_counter = 0u;
     g_files_last_click_event = 0u;
     g_files_last_click_index = SIZE_MAX;
