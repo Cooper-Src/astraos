@@ -1064,6 +1064,19 @@ static void capture_firmware_pointer(
         return;
     }
 
+    /*
+     * Reset the protocol before polling. UEFI USB mouse implementations may
+     * not start delivering input reports until Reset has completed.
+     */
+    if (pointer->reset != NULL) {
+        status = pointer->reset(pointer, 1u);
+        if (status == EFI_SUCCESS) {
+            loader_out(L"UEFI relative mouse reset completed.\\r\\n");
+        } else {
+            loader_out(L"Warning: UEFI relative mouse Reset failed; continuing.\\r\\n");
+        }
+    }
+
     boot_info->firmware_pointer_protocol = pointer;
     loader_out(L"UEFI relative mouse detected.\\r\\n");
 

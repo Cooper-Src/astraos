@@ -27,13 +27,18 @@ typedef struct AstraFirmwareSimplePointerState {
     uint8_t right_button;
 } AstraFirmwareSimplePointerState;
 
+typedef uint64_t (*AstraFirmwareResetPointer)(
+    AstraFirmwareSimplePointerProtocol *protocol,
+    uint8_t extended_verification
+);
+
 typedef uint64_t (*AstraFirmwareGetPointerState)(
     AstraFirmwareSimplePointerProtocol *protocol,
     AstraFirmwareSimplePointerState *state_out
 );
 
 struct AstraFirmwareSimplePointerProtocol {
-    void *reset;
+    AstraFirmwareResetPointer reset;
     AstraFirmwareGetPointerState get_state;
     void *wait_for_input;
     void *mode;
