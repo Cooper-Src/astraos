@@ -128,7 +128,7 @@ jobs:
           cat build/qemu-keyboard-launch.log
           cat build/qemu-keyboard-serial.log
 
-      - name: Smoke-test graphical desktop and compositor in QEMU
+      - name: Smoke-test graphical desktop, mouse, and compositor in QEMU
         shell: bash
         run: |
           set -euo pipefail
@@ -142,11 +142,11 @@ jobs:
           rm -f build/qmp-desktop.sock build/qemu-desktop-serial.log build/qemu-desktop-launch.log
           qemu-system-aarch64 \
             -machine virt -cpu cortex-a72 -m 1024 \
-            -device ramfb -device qemu-xhci -device usb-kbd \
+            -device ramfb -device qemu-xhci -device usb-kbd -device usb-tablet \
             -drive if=pflash,unit=0,format=raw,readonly=on,file="$CODE" \
             -drive if=pflash,unit=1,format=raw,file=build/uefi-desktop-vars.fd \
             -cdrom build/astraos-aarch64-desktop.iso -boot order=d \
-            -display none -serial file:build/qemu-desktop-serial.log -monitor none \
+            -display vnc=127.0.0.1:1 -serial file:build/qemu-desktop-serial.log -monitor none \
             -qmp unix:build/qmp-desktop.sock,server=on,wait=off \
             > build/qemu-desktop-launch.log 2>&1 &
           QEMU_PID=$!
