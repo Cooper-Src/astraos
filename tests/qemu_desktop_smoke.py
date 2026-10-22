@@ -340,33 +340,29 @@ def main(argv: list[str]) -> int:
 
         start_marker = "desktop: mouse start menu opened"
         click_at(
-            client, pointer, log_path, 90, 20, screen_width, screen_height,
-            start_marker, 1
+            client, pointer, log_path, 90, 20, start_marker, 1
         )
         # Capture the actual start menu too, so CI verifies more than a boot marker.
         save_and_check_screenshot(client, screenshot_path)
 
         click_at(
-            client, pointer, log_path, 90, 121, screen_width, screen_height,
-            "desktop: mouse files opened", 1
+            client, pointer, log_path, 90, 121, "desktop: mouse files opened", 1
         )
         # Taskbar buttons must minimise the active app and restore it on the next click.
         click_at(
             client, pointer, log_path, min(272, screen_width - 20), 20,
-            screen_width, screen_height, "desktop: mouse task minimized", 1
+            "desktop: mouse task minimized", 1
         )
         click_at(
             client, pointer, log_path, min(272, screen_width - 20), 20,
-            screen_width, screen_height, "desktop: mouse task restored", 1
+            "desktop: mouse task restored", 1
         )
 
         click_at(
-            client, pointer, log_path, 90, 20, screen_width, screen_height,
-            start_marker, 2
+            client, pointer, log_path, 90, 20, start_marker, 2
         )
         click_at(
-            client, pointer, log_path, 90, 94, screen_width, screen_height,
-            "desktop: mouse terminal opened", 1
+            client, pointer, log_path, 90, 94, "desktop: mouse terminal opened", 1
         )
         type_command(client, "help")
         wait_for_log_occurrence(
@@ -377,12 +373,10 @@ def main(argv: list[str]) -> int:
             log_path, "desktop: terminal window closed", 2, EVENT_TIMEOUT
         )
         click_at(
-            client, pointer, log_path, 90, 20, screen_width, screen_height,
-            start_marker, 3
+            client, pointer, log_path, 90, 20, start_marker, 3
         )
         click_at(
-            client, pointer, log_path, 90, 174, screen_width, screen_height,
-            "desktop: mouse returned to shell", 1
+            client, pointer, log_path, 90, 174, "desktop: mouse returned to shell", 1
         )
         wait_for_log(log_path, "desktop: returned to shell", EVENT_TIMEOUT)
         print("AstraOS desktop smoke test passed: framebuffer pixels, keyboard, terminal, Files, mouse clicks, start menu, taskbar minimise/restore and return-to-shell all worked.")
