@@ -84,9 +84,10 @@ class QMPClient:
 
 
 class QMPPointer:
-    """Inject absolute tablet coordinates and button edges through QEMU QMP."""
+    """Inject relative mouse movement or absolute tablet coordinates through QMP."""
 
     ABSOLUTE_MAX = 32767
+    RELATIVE_STEP_MAX = 64
 
     def __init__(
         self, client: QMPClient, width: int, height: int, *, absolute: bool
@@ -106,12 +107,30 @@ class QMPPointer:
         """Map a pixel coordinate to QEMU's 0..32767 tablet coordinate range."""
         return (value * QMPPointer.ABSOLUTE_MAX + (dimension - 2) // 2) // (dimension - 1)
 
+    def _send(self, events: list[dict[str, Any]]) -> None:
+        if events:
+            # Match the display routing assigned to the emulated USB pointer.
+            self._client.execute(
+                "input-send-event", {"device": "video0", "events": events}
+            )
+
     def pointer(self, x: int, y: int, buttons: int = 0) -> None:
         x = max(0, min(x, self.width - 1))
         y = max(0, min(y, self.height - 1))
-        events: list[dict[str, Any]] = []
+        delta_x = x - self._x
+        delta_y = y - self._y
+        button_events: list[dict[str, Any]] = []
+        for mask, name in ((1, "left"), (2, "right")):
+            before = bool(self._buttons & mask)
+            after = bool(buttons & mask)
+            if before != after:
+                button_events.append({
+                    "type": "btn",
+                    "data": {"button": name, "down": after},
+                })
+
         if self.absolute:
-            events.extend((
+            self._send([
                 {
                     "type": "abs",
                     "data": {"axis": "x", "value": self._scale_axis(x, self.width)},
@@ -120,28 +139,34 @@ class QMPPointer:
                     "type": "abs",
                     "data": {"axis": "y", "value": self._scale_axis(y, self.height)},
                 },
-            ))
+                *button_events,
+            ])
         else:
-            delta_x = x - self._x
-            delta_y = y - self._y
-            if delta_x:
-                events.append({"type": "rel", "data": {"axis": "x", "value": delta_x}})
-            if delta_y:
-                events.append({"type": "rel", "data": {"axis": "y", "value": delta_y}})
-        for mask, name in ((1, "left"), (2, "right")):
-            before = bool(self._buttons & mask)
-            after = bool(buttons & mask)
-            if before != after:
-                events.append({
-                    "type": "btn",
-                    "data": {"button": name, "down": after},
-                })
-        if events:
-            # The virtual USB devices are explicitly routed to QEMU's video0
-            # console; target the same display when injecting events over QMP.
-            self._client.execute(
-                "input-send-event", {"device": "video0", "events": events}
-            )
+            remaining_x = delta_x
+            remaining_y = delta_y
+            sent_motion = False
+            while remaining_x or remaining_y:
+                step_x = max(-self.RELATIVE_STEP_MAX,
+                             min(self.RELATIVE_STEP_MAX, remaining_x))
+                step_y = max(-self.RELATIVE_STEP_MAX,
+                             min(self.RELATIVE_STEP_MAX, remaining_y))
+                remaining_x -= step_x
+                remaining_y -= step_y
+                events: list[dict[str, Any]] = []
+                if step_x:
+                    events.append({"type": "rel", "data": {"axis": "x", "value": step_x}})
+                if step_y:
+                    events.append({"type": "rel", "data": {"axis": "y", "value": step_y}})
+                if not remaining_x and not remaining_y:
+                    events.extend(button_events)
+                self._send(events)
+                sent_motion = True
+                # Give the emulated USB interrupt endpoint time to publish each report.
+                if remaining_x or remaining_y:
+                    time.sleep(0.015)
+            if not sent_motion and button_events:
+                self._send(button_events)
+
         self._x = x
         self._y = y
         self._buttons = buttons
@@ -326,19 +351,19 @@ def main(argv: list[str]) -> int:
         ]
         if not active_mice:
             raise RuntimeError(f"QEMU has no active pointer device: {mice}")
-        absolute_mouse = next(
-            (mouse for mouse in active_mice if mouse.get("absolute") is True),
+        relative_mouse = next(
+            (mouse for mouse in active_mice if mouse.get("absolute") is False),
             None,
         )
-        if absolute_mouse is None:
+        if relative_mouse is None:
             raise RuntimeError(
-                "desktop test requires the configured usb-tablet to be the active "
-                f"absolute pointer; active devices were {active_mice}"
+                "desktop test requires the configured usb-mouse to be the active "
+                f"relative pointer; active devices were {active_mice}"
             )
-        pointer = QMPPointer(client, screen_width, screen_height, absolute=True)
+        pointer = QMPPointer(client, screen_width, screen_height, absolute=False)
         print(
-            "QMP absolute tablet input ready: "
-            f"{pointer.width}x{pointer.height} via {absolute_mouse.get('name', 'unknown device')}."
+            "QMP relative mouse input ready: "
+            f"{pointer.width}x{pointer.height} via {relative_mouse.get('name', 'unknown device')}."
         )
         client.send_key("t")
         wait_for_log(log_path, "desktop: terminal window opened", EVENT_TIMEOUT)
