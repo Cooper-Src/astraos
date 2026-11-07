@@ -474,7 +474,7 @@ static void render_panel(void) {
     astra_framebuffer_fill_rect(13u, 10u, 14u, 14u, COLOR_PANEL);
     draw_text(17u, 12u, "A", COLOR_ACCENT);
     astra_framebuffer_fill_rect(38u, 4u, 98u, 26u, COLOR_PANEL_HOVER);
-    draw_text(47u, 11u, "Applications", COLOR_PANEL_TEXT);
+    draw_text(47u, 11u, "Start", COLOR_PANEL_TEXT);
 
     for (size_t index = 0u; index < DISPLAY_SURFACE_CAP; index++) {
         const AstraDisplaySurface *surface = &g_surfaces[index];
@@ -1247,7 +1247,7 @@ static void render_window_content(const AstraDisplaySurface *surface) {
             draw_text(left, top + 79u, "Display: GOP framebuffer software compositor", COLOR_TEXT);
             draw_text(left, top + 103u, "Storage: shared fixed-size RAM filesystem", COLOR_TEXT);
             draw_text(left, top + 139u, "Input: UEFI keyboard compatibility path", COLOR_WARNING);
-            draw_text(left, top + 163u, "Mouse, persistent preferences and native HID are future work.", COLOR_MUTED);
+            draw_text(left, top + 163u, "Pointer and window dragging use UEFI firmware input; native HID is future work.", COLOR_MUTED);
             break;
         case DISPLAY_APP_VIEWER:
             render_viewer(surface);
@@ -1306,7 +1306,7 @@ static void render_applications_menu(void) {
     astra_framebuffer_fill_rect(x + 4u, y + 4u, width, height, COLOR_PANEL);
     astra_framebuffer_fill_rect(x, y, width, height, COLOR_WINDOW_EDGE);
     astra_framebuffer_fill_rect(x + 2u, y + 2u, width - 4u, height - 4u, COLOR_PANEL);
-    draw_text(x + 12u, y + 12u, "Applications", COLOR_ACCENT);
+    draw_text(x + 12u, y + 12u, "Start Menu", COLOR_ACCENT);
     astra_framebuffer_fill_rect(x + 8u, y + 31u, width - 16u, 1u, COLOR_PANEL_EDGE);
     draw_text(x + 14u, y + 43u, "Accessories", COLOR_MUTED);
     draw_text(x + 20u, y + 65u, "T  Terminal", COLOR_PANEL_TEXT);
