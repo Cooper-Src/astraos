@@ -1448,13 +1448,13 @@ static void open_pointer_app(AstraDisplayApp app) {
     g_menu_open = false;
     switch (app) {
         case DISPLAY_APP_TERMINAL:
-            astra_uart_puts("desktop: mouse terminal opened\\n");
+            astra_uart_puts("desktop: mouse terminal opened\n");
             break;
         case DISPLAY_APP_FILES:
-            astra_uart_puts("desktop: mouse files opened\\n");
+            astra_uart_puts("desktop: mouse files opened\n");
             break;
         case DISPLAY_APP_ABOUT:
-            astra_uart_puts("desktop: mouse settings opened\\n");
+            astra_uart_puts("desktop: mouse settings opened\n");
             break;
         default:
             break;
@@ -1467,13 +1467,13 @@ static void raise_task_surface(AstraDisplaySurface *surface) {
         surface->visible = true;
         surface->minimized = false;
         focus_surface(surface);
-        astra_uart_puts("desktop: mouse task restored\\n");
+        astra_uart_puts("desktop: mouse task restored\n");
     } else if (surface->focused) {
         minimize_surface(surface);
-        astra_uart_puts("desktop: mouse task minimized\\n");
+        astra_uart_puts("desktop: mouse task minimized\n");
     } else {
         focus_surface(surface);
-        astra_uart_puts("desktop: mouse task focused\\n");
+        astra_uart_puts("desktop: mouse task focused\n");
     }
 }
 
@@ -1491,7 +1491,7 @@ static bool handle_pointer_click(void) {
                 open_pointer_app(DISPLAY_APP_ABOUT);
             } else if (row >= 158u && row < 180u) {
                 stop_display_server();
-                astra_uart_puts("desktop: mouse returned to shell\\n");
+                astra_uart_puts("desktop: mouse returned to shell\n");
                 return true;
             }
             return false;
@@ -1502,8 +1502,8 @@ static bool handle_pointer_click(void) {
     if (point_in_rect(g_pointer_x, g_pointer_y, 8u, 3u, 130u, 31u)) {
         g_menu_open = !g_menu_open;
         astra_uart_puts(g_menu_open ?
-            "desktop: mouse start menu opened\\n" :
-            "desktop: mouse start menu closed\\n");
+            "desktop: mouse start menu opened\n" :
+            "desktop: mouse start menu closed\n");
         return false;
     }
     if (point_in_rect(g_pointer_x, g_pointer_y, 16u, 62u, 76u, 58u)) {
@@ -1546,20 +1546,20 @@ static bool handle_pointer_click(void) {
                     surface->y + 9u, 16u, 14u)) {
                 const bool was_terminal = surface->app == DISPLAY_APP_TERMINAL;
                 close_surface(surface);
-                astra_uart_puts("desktop: mouse window closed\\n");
-                if (was_terminal) astra_uart_puts("desktop: terminal window closed\\n");
+                astra_uart_puts("desktop: mouse window closed\n");
+                if (was_terminal) astra_uart_puts("desktop: terminal window closed\n");
                 return false;
             }
             if (point_in_rect(g_pointer_x, g_pointer_y, right - 47u,
                     surface->y + 9u, 16u, 14u)) {
                 toggle_maximize_surface(surface);
-                astra_uart_puts("desktop: mouse window maximized\\n");
+                astra_uart_puts("desktop: mouse window maximized\n");
                 return false;
             }
             if (point_in_rect(g_pointer_x, g_pointer_y, right - 71u,
                     surface->y + 9u, 16u, 14u)) {
                 minimize_surface(surface);
-                astra_uart_puts("desktop: mouse window minimized\\n");
+                astra_uart_puts("desktop: mouse window minimized\n");
                 return false;
             }
             if (!surface->maximized) {
@@ -1584,10 +1584,10 @@ static bool handle_pointer_click(void) {
                     if (g_pointer_last_file_selection == selected) {
                         files_open_selected();
                         g_pointer_last_file_selection = SIZE_MAX;
-                        astra_uart_puts("desktop: mouse file entry opened\\n");
+                        astra_uart_puts("desktop: mouse file entry opened\n");
                     } else {
                         g_pointer_last_file_selection = selected;
-                        astra_uart_puts("desktop: mouse file entry selected\\n");
+                        astra_uart_puts("desktop: mouse file entry selected\n");
                     }
                 }
             }
@@ -1702,15 +1702,15 @@ bool astra_display_server_run(void) {
     );
 
     astra_uart_puts(g_pointer_available ?
-        "ASTRAOS_POINTER_INPUT_READY\\n" :
-        "AstraOS pointer unavailable; keyboard shortcuts remain active.\\n");
+        "ASTRAOS_POINTER_INPUT_READY\n" :
+        "AstraOS pointer unavailable; keyboard shortcuts remain active.\n");
 
     for (;;) {
         AstraDisplaySurface *focus = focused_surface();
         AstraInputEvent input_event = {0};
 
         if (!astra_input_read_event(&input_event)) {
-            astra_uart_puts("Display server input failed; returning to the shell.\\n");
+            astra_uart_puts("Display server input failed; returning to the shell.\n");
             stop_display_server();
             return false;
         }
