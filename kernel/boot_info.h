@@ -51,6 +51,9 @@ typedef struct AstraFirmwareAbsolutePointerMode {
     uint64_t absolute_max_x;
     uint64_t absolute_max_y;
     uint64_t absolute_max_z;
+    uint64_t resolution_x;
+    uint64_t resolution_y;
+    uint64_t resolution_z;
     uint32_t attributes;
 } AstraFirmwareAbsolutePointerMode;
 
