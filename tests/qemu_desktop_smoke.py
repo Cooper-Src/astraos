@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import socket
+import struct
 import sys
 import time
 from pathlib import Path
@@ -82,6 +83,96 @@ class QMPClient:
         self.execute("human-monitor-command", {"command-line": f"sendkey {key}"})
 
 
+class QMPPointer:
+    """Inject relative mouse movement or absolute tablet coordinates through QMP."""
+
+    ABSOLUTE_MAX = 32767
+    RELATIVE_STEP_MAX = 100
+    RELATIVE_COUNTS_PER_PIXEL = 2
+
+    def __init__(
+        self, client: QMPClient, width: int, height: int, *, absolute: bool
+    ) -> None:
+        if width < 2 or height < 2:
+            raise ValueError("pointer surface must be at least 2x2 pixels")
+        self._client = client
+        self.width = width
+        self.height = height
+        self.absolute = absolute
+        self._x = width // 2
+        self._y = height // 2
+        self._buttons = 0
+
+    @staticmethod
+    def _scale_axis(value: int, dimension: int) -> int:
+        """Map a pixel coordinate to QEMU's 0..32767 tablet coordinate range."""
+        return (value * QMPPointer.ABSOLUTE_MAX + (dimension - 2) // 2) // (dimension - 1)
+
+    def _send(self, events: list[dict[str, Any]]) -> None:
+        if events:
+            # No device routing is configured for this USB mouse. QMP's
+            # documented default then delivers events to unrouted pointers.
+            self._client.execute("input-send-event", {"events": events})
+
+    def pointer(self, x: int, y: int, buttons: int = 0) -> None:
+        x = max(0, min(x, self.width - 1))
+        y = max(0, min(y, self.height - 1))
+        delta_x = x - self._x
+        delta_y = y - self._y
+        button_events: list[dict[str, Any]] = []
+        for mask, name in ((1, "left"), (2, "right")):
+            before = bool(self._buttons & mask)
+            after = bool(buttons & mask)
+            if before != after:
+                button_events.append({
+                    "type": "btn",
+                    "data": {"button": name, "down": after},
+                })
+
+        if self.absolute:
+            self._send([
+                {
+                    "type": "abs",
+                    "data": {"axis": "x", "value": self._scale_axis(x, self.width)},
+                },
+                {
+                    "type": "abs",
+                    "data": {"axis": "y", "value": self._scale_axis(y, self.height)},
+                },
+                *button_events,
+            ])
+        else:
+            # TianoCore UsbMouseDxe reports 8 counts/mm. AstraOS scales
+            # at four pixels/mm, so two HID counts correspond to one pixel.
+            remaining_x = delta_x * self.RELATIVE_COUNTS_PER_PIXEL
+            remaining_y = delta_y * self.RELATIVE_COUNTS_PER_PIXEL
+            sent_motion = False
+            while remaining_x or remaining_y:
+                step_x = max(-self.RELATIVE_STEP_MAX,
+                             min(self.RELATIVE_STEP_MAX, remaining_x))
+                step_y = max(-self.RELATIVE_STEP_MAX,
+                             min(self.RELATIVE_STEP_MAX, remaining_y))
+                remaining_x -= step_x
+                remaining_y -= step_y
+                events: list[dict[str, Any]] = []
+                if step_x:
+                    events.append({"type": "rel", "data": {"axis": "x", "value": step_x}})
+                if step_y:
+                    events.append({"type": "rel", "data": {"axis": "y", "value": step_y}})
+                if not remaining_x and not remaining_y:
+                    events.extend(button_events)
+                self._send(events)
+                sent_motion = True
+                # Give the emulated USB interrupt endpoint time to publish each report.
+                if remaining_x or remaining_y:
+                    time.sleep(0.015)
+            if not sent_motion and button_events:
+                self._send(button_events)
+
+        self._x = x
+        self._y = y
+        self._buttons = buttons
+
 def read_log(path: Path) -> str:
     try:
         return path.read_text(encoding="utf-8", errors="replace")
@@ -103,6 +194,113 @@ def wait_for_log(path: Path, needle: str, timeout: float) -> str:
     )
 
 
+def wait_for_log_occurrence(
+    path: Path, needle: str, occurrence: int, timeout: float
+) -> str:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        content = read_log(path)
+        if content.count(needle) >= occurrence:
+            return content
+        time.sleep(0.1)
+    content = read_log(path)
+    raise TimeoutError(
+        f"serial output did not reach occurrence {occurrence} of {needle!r}. "
+        f"Final output:\n{content[-6000:] if content else '(serial log is empty)'}"
+    )
+
+
+def save_and_check_screenshot(
+    client: QMPClient, path: Path, *, require_menu: bool = False
+) -> tuple[int, int]:
+    path.unlink(missing_ok=True)
+    client.execute("screendump", {"filename": str(path), "format": "ppm"})
+    data = path.read_bytes()
+    position = 0
+
+    def token() -> bytes:
+        nonlocal position
+        while position < len(data):
+            if data[position] in b" \t\r\n":
+                position += 1
+            elif data[position] == ord("#"):
+                while position < len(data) and data[position] not in b"\r\n":
+                    position += 1
+            else:
+                break
+        start = position
+        while position < len(data) and data[position] not in b" \t\r\n#":
+            position += 1
+        if start == position:
+            raise ValueError("invalid PPM screenshot header")
+        return data[start:position]
+
+    if token() != b"P6":
+        raise ValueError("QEMU screenshot is not a binary RGB PPM")
+    width = int(token())
+    height = int(token())
+    max_value = int(token())
+    if width < 480 or height < 360 or max_value != 255:
+        raise ValueError(f"unexpected desktop screenshot geometry/format: {width}x{height}, max={max_value}")
+    if position < len(data) and data[position:position + 2] == b"\r\n":
+        position += 2
+    elif position < len(data) and data[position] in b" \t\r\n":
+        position += 1
+    pixels = data[position:]
+    if len(pixels) != width * height * 3:
+        raise ValueError(
+            f"truncated screenshot: expected {width * height * 3} RGB bytes, got {len(pixels)}"
+        )
+
+    sample_step_x = max(1, width // 48)
+    sample_step_y = max(1, height // 32)
+    colors: set[tuple[int, int, int]] = set()
+    for y in range(0, height, sample_step_y):
+        for x in range(0, width, sample_step_x):
+            offset = (y * width + x) * 3
+            colors.add((pixels[offset], pixels[offset + 1], pixels[offset + 2]))
+    if len(colors) < 12:
+        raise ValueError(
+            f"desktop screenshot looks blank/unrendered: only {len(colors)} sampled colors"
+        )
+
+    def pixel_at(x: int, y: int) -> tuple[int, int, int]:
+        offset = (y * width + x) * 3
+        return pixels[offset], pixels[offset + 1], pixels[offset + 2]
+
+    workspace = pixel_at(width // 2, height // 2)
+    top_panel = pixel_at(5, 5)
+    bottom_panel = pixel_at(5, height - 10)
+    if top_panel == workspace or bottom_panel == workspace:
+        raise ValueError(
+            "desktop screenshot is missing a distinct top or bottom panel"
+        )
+    if require_menu and pixel_at(20, 50) == workspace:
+        raise ValueError("Start menu panel is not visible in the captured screenshot")
+    print(
+        f"Desktop screenshot validated: {width}x{height}, {len(colors)} sampled colors, "
+        f"top/bottom panels{' and Start menu' if require_menu else ''} ({path})."
+    )
+    return width, height
+
+
+def click_at(
+    pointer: QMPPointer,
+    log_path: Path,
+    x: int,
+    y: int,
+    marker: str,
+    occurrence: int,
+) -> None:
+    pointer.pointer(x, y, buttons=0)
+    time.sleep(0.2)
+    pointer.pointer(x, y, buttons=1)
+    try:
+        wait_for_log_occurrence(log_path, marker, occurrence, EVENT_TIMEOUT)
+    finally:
+        pointer.pointer(x, y, buttons=0)
+
+
 def type_command(client: QMPClient, command: str) -> None:
     for character in command:
         if character == " ":
@@ -119,13 +317,15 @@ def type_command(client: QMPClient, command: str) -> None:
 
 
 def main(argv: list[str]) -> int:
-    if len(argv) != 3:
-        print(f"usage: {argv[0]} QMP_SOCKET SERIAL_LOG", file=sys.stderr)
+    if len(argv) != 4:
+        print(f"usage: {argv[0]} QMP_SOCKET SERIAL_LOG SCREENSHOT_PPM", file=sys.stderr)
         return 2
 
     socket_path = argv[1]
     log_path = Path(argv[2])
+    screenshot_path = Path(argv[3])
     client: QMPClient | None = None
+    pointer: QMPPointer | None = None
     try:
         connect_deadline = time.monotonic() + CONNECT_TIMEOUT
         last_error: OSError | None = None
@@ -140,6 +340,33 @@ def main(argv: list[str]) -> int:
             raise RuntimeError(f"could not connect to QMP socket: {last_error}")
 
         wait_for_log(log_path, "ASTRAOS_DISPLAY_SERVER_READY", BOOT_TIMEOUT)
+        wait_for_log(log_path, "ASTRAOS_POINTER_INPUT_READY", BOOT_TIMEOUT)
+        screen_width, screen_height = save_and_check_screenshot(client, screenshot_path)
+
+        mice = client.execute("query-mice")
+        print(f"QEMU pointer devices: {mice}")
+        if not isinstance(mice, list):
+            raise RuntimeError("QMP query-mice did not return a device list")
+        active_mice = [
+            mouse for mouse in mice
+            if isinstance(mouse, dict) and mouse.get("current") is True
+        ]
+        if not active_mice:
+            raise RuntimeError(f"QEMU has no active pointer device: {mice}")
+        relative_mouse = next(
+            (mouse for mouse in active_mice if mouse.get("absolute") is False),
+            None,
+        )
+        if relative_mouse is None:
+            raise RuntimeError(
+                "desktop test requires the configured usb-mouse to be the active "
+                f"relative pointer; active devices were {active_mice}"
+            )
+        pointer = QMPPointer(client, screen_width, screen_height, absolute=False)
+        print(
+            "QMP relative mouse input ready: "
+            f"{pointer.width}x{pointer.height} via {relative_mouse.get('name', 'unknown device')}."
+        )
         client.send_key("t")
         wait_for_log(log_path, "desktop: terminal window opened", EVENT_TIMEOUT)
         type_command(client, "help")
@@ -150,7 +377,7 @@ def main(argv: list[str]) -> int:
         wait_for_log(log_path, "desktop: terminal command ls", EVENT_TIMEOUT)
         type_command(client, "exit")
         wait_for_log(log_path, "desktop: terminal window closed", EVENT_TIMEOUT)
-        client.send_key("s")
+        client.send_key("a")
         wait_for_log(log_path, "desktop: settings window focused", EVENT_TIMEOUT)
         client.send_key("m")
         wait_for_log(log_path, "desktop: applications menu opened", EVENT_TIMEOUT)
@@ -160,11 +387,39 @@ def main(argv: list[str]) -> int:
         wait_for_log(log_path, "desktop: files refreshed", EVENT_TIMEOUT)
         client.send_key("c")
         wait_for_log(log_path, "desktop: window closed", EVENT_TIMEOUT)
-        client.send_key("n")
-        wait_for_log(log_path, "desktop: window minimized", EVENT_TIMEOUT)
-        client.send_key("q")
+        # The second Files button in the task list is x=246..350 at 800x600.
+        client.send_key("f")
+        wait_for_log_occurrence(log_path, "desktop: file browser opened", 2, EVENT_TIMEOUT)
+
+        start_marker = "desktop: mouse start menu opened"
+        click_at(pointer, log_path, 90, 20, start_marker, 1)
+        save_and_check_screenshot(client, screenshot_path, require_menu=True)
+
+        # Start Menu -> Files, then select and open a directory/file entry.
+        click_at(pointer, log_path, 90, 128, "desktop: mouse files opened", 1)
+        click_at(pointer, log_path, 100, 143, "desktop: mouse file entry selected", 1)
+        click_at(pointer, log_path, 100, 143, "desktop: mouse file entry opened", 1)
+
+        # Taskbar buttons minimise the focused Files window and restore it.
+        click_at(pointer, log_path, min(272, screen_width - 20), 20,
+                 "desktop: mouse task minimized", 1)
+        click_at(pointer, log_path, min(272, screen_width - 20), 20,
+                 "desktop: mouse task restored", 1)
+
+        click_at(pointer, log_path, 90, 20, start_marker, 2)
+        click_at(pointer, log_path, 90, 106, "desktop: mouse terminal opened", 1)
+        type_command(client, "help")
+        wait_for_log_occurrence(
+            log_path, "desktop: terminal command help", 2, EVENT_TIMEOUT
+        )
+        type_command(client, "exit")
+        wait_for_log_occurrence(
+            log_path, "desktop: terminal window closed", 2, EVENT_TIMEOUT
+        )
+        click_at(pointer, log_path, 90, 20, start_marker, 3)
+        click_at(pointer, log_path, 90, 207, "desktop: mouse returned to shell", 1)
         wait_for_log(log_path, "desktop: returned to shell", EVENT_TIMEOUT)
-        print("AstraOS desktop smoke test passed: compositor, shared-filesystem terminal, launcher, file manager and window controls worked.")
+        print("AstraOS desktop smoke test passed: visible panels and Start menu, keyboard and mouse input, Terminal commands, Files selection/opening, taskbar minimise/restore, and return-to-shell all worked.")
         return 0
     except (OSError, RuntimeError, TimeoutError, ValueError, json.JSONDecodeError) as error:
         print(f"desktop smoke test failed: {error}", file=sys.stderr)
