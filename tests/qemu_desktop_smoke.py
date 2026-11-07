@@ -110,10 +110,9 @@ class QMPPointer:
 
     def _send(self, events: list[dict[str, Any]]) -> None:
         if events:
-            # Match the display routing assigned to the emulated USB pointer.
-            self._client.execute(
-                "input-send-event", {"device": "video0", "events": events}
-            )
+            # No device routing is configured for this USB mouse. QMP's
+            # documented default then delivers events to unrouted pointers.
+            self._client.execute("input-send-event", {"events": events})
 
     def pointer(self, x: int, y: int, buttons: int = 0) -> None:
         x = max(0, min(x, self.width - 1))
