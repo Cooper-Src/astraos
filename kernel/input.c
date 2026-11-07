@@ -515,6 +515,16 @@ bool astra_input_read_event(AstraInputEvent *event_out) {
                 event_out->movement_z = pointer.relative_movement_z;
                 event_out->left_button = pointer.left_button != 0u;
                 event_out->right_button = pointer.right_button != 0u;
+                astra_uart_puts("ASTRAOS_SIMPLE_POINTER_EVENT dx=");
+                astra_uart_put_hex((uint32_t)event_out->movement_x);
+                astra_uart_puts(" dy=");
+                astra_uart_put_hex((uint32_t)event_out->movement_y);
+                astra_uart_puts(" buttons=");
+                astra_uart_put_hex(
+                    (event_out->left_button ? 1u : 0u) |
+                    (event_out->right_button ? 2u : 0u)
+                );
+                astra_uart_puts("\n");
                 return true;
             }
             if (pointer_status != ASTRA_INPUT_EFI_NOT_READY) {
