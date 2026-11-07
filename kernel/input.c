@@ -286,7 +286,8 @@ static uint64_t firmware_wait_for_input(void) {
         events[event_count] = g_firmware_absolute_pointer->wait_for_input;
         event_count++;
     }
-    if (g_firmware_pointer != NULL && g_firmware_pointer->wait_for_input != NULL) {
+    if (g_firmware_absolute_pointer == NULL && g_firmware_pointer != NULL &&
+        g_firmware_pointer->wait_for_input != NULL) {
         events[event_count] = g_firmware_pointer->wait_for_input;
         event_count++;
     }
@@ -467,7 +468,7 @@ bool astra_input_read_event(AstraInputEvent *event_out) {
             }
         }
 
-        if (g_firmware_pointer != NULL) {
+        if (g_firmware_absolute_pointer == NULL && g_firmware_pointer != NULL) {
             AstraFirmwarePointerState pointer = {0};
             const uint64_t pointer_status = firmware_read_pointer(&pointer);
             if (pointer_status == ASTRA_INPUT_EFI_SUCCESS) {
