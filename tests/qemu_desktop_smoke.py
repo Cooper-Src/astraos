@@ -84,26 +84,50 @@ class QMPClient:
 
 
 class QMPPointer:
-    """Inject relative mouse and button events through QEMU's input layer."""
+    """Inject absolute tablet coordinates and button edges through QEMU QMP."""
 
-    def __init__(self, client: QMPClient, width: int, height: int) -> None:
+    ABSOLUTE_MAX = 32767
+
+    def __init__(
+        self, client: QMPClient, width: int, height: int, *, absolute: bool
+    ) -> None:
+        if width < 2 or height < 2:
+            raise ValueError("pointer surface must be at least 2x2 pixels")
         self._client = client
         self.width = width
         self.height = height
+        self.absolute = absolute
         self._x = width // 2
         self._y = height // 2
         self._buttons = 0
 
+    @staticmethod
+    def _scale_axis(value: int, dimension: int) -> int:
+        """Map a pixel coordinate to QEMU's 0..32767 tablet coordinate range."""
+        return (value * QMPPointer.ABSOLUTE_MAX + (dimension - 2) // 2) // (dimension - 1)
+
     def pointer(self, x: int, y: int, buttons: int = 0) -> None:
         x = max(0, min(x, self.width - 1))
         y = max(0, min(y, self.height - 1))
-        delta_x = x - self._x
-        delta_y = y - self._y
         events: list[dict[str, Any]] = []
-        if delta_x:
-            events.append({"type": "rel", "data": {"axis": "x", "value": delta_x}})
-        if delta_y:
-            events.append({"type": "rel", "data": {"axis": "y", "value": delta_y}})
+        if self.absolute:
+            events.extend((
+                {
+                    "type": "abs",
+                    "data": {"axis": "x", "value": self._scale_axis(x, self.width)},
+                },
+                {
+                    "type": "abs",
+                    "data": {"axis": "y", "value": self._scale_axis(y, self.height)},
+                },
+            ))
+        else:
+            delta_x = x - self._x
+            delta_y = y - self._y
+            if delta_x:
+                events.append({"type": "rel", "data": {"axis": "x", "value": delta_x}})
+            if delta_y:
+                events.append({"type": "rel", "data": {"axis": "y", "value": delta_y}})
         for mask, name in ((1, "left"), (2, "right")):
             before = bool(self._buttons & mask)
             after = bool(buttons & mask)
@@ -269,13 +293,30 @@ def main(argv: list[str]) -> int:
         wait_for_log(log_path, "ASTRAOS_POINTER_INPUT_READY", BOOT_TIMEOUT)
         screen_width, screen_height = save_and_check_screenshot(client, screenshot_path)
 
-        pointer = QMPPointer(client, screen_width, screen_height)
-        try:
-            mice = client.execute("query-mice")
-            print(f"QEMU pointer devices: {mice}")
-        except RuntimeError as error:
-            print(f"QEMU query-mice diagnostic unavailable: {error}")
-        print(f"QMP pointer input ready: {pointer.width}x{pointer.height}.")
+        mice = client.execute("query-mice")
+        print(f"QEMU pointer devices: {mice}")
+        if not isinstance(mice, list):
+            raise RuntimeError("QMP query-mice did not return a device list")
+        active_mice = [
+            mouse for mouse in mice
+            if isinstance(mouse, dict) and mouse.get("current") is True
+        ]
+        if not active_mice:
+            raise RuntimeError(f"QEMU has no active pointer device: {mice}")
+        absolute_mouse = next(
+            (mouse for mouse in active_mice if mouse.get("absolute") is True),
+            None,
+        )
+        if absolute_mouse is None:
+            raise RuntimeError(
+                "desktop test requires the configured usb-tablet to be the active "
+                f"absolute pointer; active devices were {active_mice}"
+            )
+        pointer = QMPPointer(client, screen_width, screen_height, absolute=True)
+        print(
+            "QMP absolute tablet input ready: "
+            f"{pointer.width}x{pointer.height} via {absolute_mouse.get('name', 'unknown device')}."
+        )
         client.send_key("t")
         wait_for_log(log_path, "desktop: terminal window opened", EVENT_TIMEOUT)
         type_command(client, "help")
