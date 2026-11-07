@@ -237,7 +237,7 @@ static uint64_t firmware_read_absolute_pointer(
         g_pointer_state_diagnostic_reported = true;
         astra_uart_puts("ASTRAOS_ABSOLUTE_POINTER_FIRST_STATUS=");
         astra_uart_put_hex((uint32_t)status);
-        astra_uart_puts("\\n");
+        astra_uart_puts("\n");
     }
     return status;
 }
@@ -320,7 +320,7 @@ static uint64_t firmware_wait_for_input(void) {
         astra_uart_put_hex((uint32_t)event_count);
         astra_uart_puts(" timer=");
         astra_uart_put_hex(g_firmware_poll_timer_event != NULL ? 1u : 0u);
-        astra_uart_puts("\\n");
+        astra_uart_puts("\n");
     }
 #else
     (void)state;
@@ -489,7 +489,7 @@ bool astra_input_read_event(AstraInputEvent *event_out) {
                 astra_uart_put_hex(event_out->absolute_y);
                 astra_uart_puts(" buttons=");
                 astra_uart_put_hex(pointer.active_buttons);
-                astra_uart_puts("\\n");
+                astra_uart_puts("\n");
                 return true;
             }
             if (pointer_status != ASTRA_INPUT_EFI_NOT_READY) {
