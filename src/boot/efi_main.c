@@ -588,7 +588,7 @@ static bool configure_firmware_keyboard_console(
             if (pointer->get_state != NULL && pointer->wait_for_input != NULL) {
                 boot_info->firmware_pointer_protocol = pointer;
                 boot_info->flags |= ASTRA_BOOT_FLAG_UEFI_POINTER_INPUT;
-                loader_out(L"UEFI Simple Pointer protocol discovered.\\r\\n");
+                loader_out(L"UEFI Simple Pointer protocol discovered.\r\n");
             }
         }
     }
@@ -608,7 +608,7 @@ static bool configure_firmware_keyboard_console(
                 pointer->mode->absolute_max_y > pointer->mode->absolute_min_y) {
                 boot_info->firmware_absolute_pointer_protocol = pointer;
                 boot_info->flags |= ASTRA_BOOT_FLAG_UEFI_ABSOLUTE_POINTER_INPUT;
-                loader_out(L"UEFI Absolute Pointer protocol discovered.\\r\\n");
+                loader_out(L"UEFI Absolute Pointer protocol discovered.\r\n");
             }
         }
     }
@@ -631,7 +631,7 @@ static bool configure_firmware_keyboard_console(
             );
             if (timer_status == EFI_SUCCESS) {
                 boot_info->firmware_poll_timer_event = timer_event;
-                loader_out(L"UEFI pointer polling timer armed.\\r\\n");
+                loader_out(L"UEFI pointer polling timer armed.\r\n");
             } else if (system_table->BootServices->CloseEvent != NULL) {
                 (void)system_table->BootServices->CloseEvent(timer_event);
             }
