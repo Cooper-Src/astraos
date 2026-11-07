@@ -87,7 +87,8 @@ class QMPPointer:
     """Inject relative mouse movement or absolute tablet coordinates through QMP."""
 
     ABSOLUTE_MAX = 32767
-    RELATIVE_STEP_MAX = 64
+    RELATIVE_STEP_MAX = 100
+    RELATIVE_COUNTS_PER_PIXEL = 2
 
     def __init__(
         self, client: QMPClient, width: int, height: int, *, absolute: bool
@@ -142,8 +143,10 @@ class QMPPointer:
                 *button_events,
             ])
         else:
-            remaining_x = delta_x
-            remaining_y = delta_y
+            # TianoCore UsbMouseDxe reports 8 counts/mm. AstraOS scales
+            # at four pixels/mm, so two HID counts correspond to one pixel.
+            remaining_x = delta_x * self.RELATIVE_COUNTS_PER_PIXEL
+            remaining_y = delta_y * self.RELATIVE_COUNTS_PER_PIXEL
             sent_motion = False
             while remaining_x or remaining_y:
                 step_x = max(-self.RELATIVE_STEP_MAX,
