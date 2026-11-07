@@ -137,7 +137,11 @@ class QMPPointer:
                     "data": {"button": name, "down": after},
                 })
         if events:
-            self._client.execute("input-send-event", {"events": events})
+            # The virtual USB devices are explicitly routed to QEMU's video0
+            # console; target the same display when injecting events over QMP.
+            self._client.execute(
+                "input-send-event", {"device": "video0", "events": events}
+            )
         self._x = x
         self._y = y
         self._buttons = buttons
